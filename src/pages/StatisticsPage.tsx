@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useApp } from '../context/AppContext';
-import { apiFetch, formatNumber } from '../lib/api';
+import { formatNumber } from '../lib/api';
+import { getStatisticsData } from '../lib/firestoreService';
 
 interface ModuleStats {
   total: number;
@@ -77,7 +78,7 @@ interface StatsResponse {
 }
 
 export const StatisticsPage: React.FC = () => {
-  const { departments, districts, settings } = useApp();
+  const { user, departments, districts, seccionales, territorialMaps, settings } = useApp();
   const [tab, setTab] = useState<'coordinators' | 'youth' | 'women' | 'votes'>('coordinators');
   const [coordView, setCoordView] = useState<'dept' | 'dist' | 'secc'>('dept');
   const [departmentId, setDepartmentId] = useState('');
@@ -86,22 +87,28 @@ export const StatisticsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   const filterDistricts = useMemo(
-    () => (departmentId ? districts.filter((d) => d.department_id === Number(departmentId)) : districts),
+    () => (departmentId ? districts.filter((d) => d.department_id === departmentId) : districts),
     [districts, departmentId]
   );
 
   const loadStats = useCallback(async () => {
+    if (!user) return;
     setLoading(true);
     try {
-      const qs = new URLSearchParams();
-      if (departmentId) qs.set('department_id', departmentId);
-      if (districtId) qs.set('district_id', districtId);
-      const res = await apiFetch<StatsResponse>(`/api/statistics?${qs.toString()}`);
+      const res = await getStatisticsData(
+        user,
+        {
+          department_id: departmentId || undefined,
+          district_id: districtId || undefined,
+        },
+        territorialMaps,
+        { departments, districts, seccionales }
+      );
       setStats(res);
     } finally {
       setLoading(false);
     }
-  }, [departmentId, districtId]);
+  }, [user, departmentId, districtId, territorialMaps, departments, districts, seccionales]);
 
   useEffect(() => {
     loadStats();

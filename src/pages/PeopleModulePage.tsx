@@ -12,8 +12,9 @@ import {
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { useApp } from '../context/AppContext';
-import { apiFetch, formatDisplayDate, formatNumber } from '../lib/api';
+import { formatDisplayDate, formatNumber } from '../lib/api';
 import { exportIndividualFichaPDF, exportTableToExcel, exportTableToPDF } from '../lib/export';
+import { deletePerson, listPeople, savePerson } from '../lib/firestoreService';
 import { PersonRecord } from '../types';
 
 interface PeopleModulePageProps {
@@ -39,10 +40,11 @@ export const PeopleModulePage: React.FC<PeopleModulePageProps> = ({
   singularLabel,
   description,
 }) => {
-  const { departments, districts, seccionales, customFields, settings, hasPermission, notify } = useApp();
+  const { user, departments, districts, seccionales, territorialMaps, customFields, settings, hasPermission, notify } = useApp();
+  const canViewSensitive = hasPermission('sensitive_data:view');
 
   const moduleCustomFields = useMemo(
-    () => customFields.filter((f) => f.module === moduleKey && f.active === 1),
+    () => customFields.filter((f) => f.module === moduleKey && f.active),
     [customFields, moduleKey]
   );
 
@@ -84,43 +86,48 @@ export const PeopleModulePage: React.FC<PeopleModulePageProps> = ({
   const [saving, setSaving] = useState(false);
 
   const filterDistricts = useMemo(
-    () => (filterDept ? districts.filter((d) => d.department_id === Number(filterDept)) : districts),
+    () => (filterDept ? districts.filter((d) => d.department_id === filterDept) : districts),
     [districts, filterDept]
   );
 
   const formDistricts = useMemo(
-    () => (departmentId ? districts.filter((d) => d.department_id === Number(departmentId) && d.active === 1) : []),
+    () => (departmentId ? districts.filter((d) => d.department_id === departmentId && d.active) : []),
     [districts, departmentId]
   );
 
   const formSeccionales = useMemo(
     () =>
       districtId
-        ? seccionales.filter((s) => s.district_id === Number(districtId) && s.active === 1)
+        ? seccionales.filter((s) => s.district_id === districtId && s.active)
         : [],
     [seccionales, districtId]
   );
 
   const loadData = useCallback(async () => {
+    if (!user) return;
     setLoading(true);
     try {
-      const qs = new URLSearchParams({
-        page: String(page),
-        limit: '12',
-      });
-      if (search.trim()) qs.set('search', search.trim());
-      if (filterDept) qs.set('department_id', filterDept);
-      if (filterDist) qs.set('district_id', filterDist);
-      if (filterSecc.trim()) qs.set('seccional_number', filterSecc.trim());
-
-      const res = await apiFetch<PeopleResponse>(`/api/people/${moduleKey}?${qs.toString()}`);
+      const res = await listPeople(
+        user,
+        moduleKey,
+        {
+          search: search.trim() || undefined,
+          department_id: filterDept || undefined,
+          district_id: filterDist || undefined,
+          seccional_number: filterSecc.trim() || undefined,
+          page,
+          limit: 12,
+        },
+        territorialMaps,
+        canViewSensitive
+      );
       setData(res);
     } catch (err: unknown) {
       notify(err instanceof Error ? err.message : 'Error al cargar registros.', 'error');
     } finally {
       setLoading(false);
     }
-  }, [moduleKey, page, search, filterDept, filterDist, filterSecc, notify]);
+  }, [user, moduleKey, page, search, filterDept, filterDist, filterSecc, territorialMaps, canViewSensitive, notify]);
 
   useEffect(() => {
     setPage(1);
@@ -139,11 +146,11 @@ export const PeopleModulePage: React.FC<PeopleModulePageProps> = ({
     setFirstName('');
     setLastName('');
     setCi('');
-    const firstDept = departments.find((d) => d.active === 1);
-    const defaultDeptId = firstDept ? String(firstDept.id) : '';
-    const firstDist = districts.find((d) => d.department_id === Number(defaultDeptId) && d.active === 1);
+    const firstDept = departments.find((d) => d.active);
+    const defaultDeptId = firstDept ? firstDept.id : '';
+    const firstDist = districts.find((d) => d.department_id === defaultDeptId && d.active);
     setDepartmentId(defaultDeptId);
-    setDistrictId(firstDist ? String(firstDist.id) : '');
+    setDistrictId(firstDist ? firstDist.id : '');
     setSeccionalNumber('');
     setPhone('');
     setRegisteredAt(new Date().toISOString().slice(0, 10));
@@ -159,10 +166,10 @@ export const PeopleModulePage: React.FC<PeopleModulePageProps> = ({
     setFirstName(rec.first_name);
     setLastName(rec.last_name);
     setCi(rec.ci_raw || rec.ci);
-    setDepartmentId(String(rec.department_id));
-    setDistrictId(String(rec.district_id));
+    setDepartmentId(rec.department_id);
+    setDistrictId(rec.district_id);
     setSeccionalNumber(String(rec.seccional_number));
-    setPhone(rec.phone);
+    setPhone(rec.phone_raw || rec.phone);
     setRegisteredAt(rec.registered_at.slice(0, 10));
     setNotes(rec.notes || '');
     setConsentAccepted(!!rec.consent_accepted);
@@ -177,6 +184,7 @@ export const PeopleModulePage: React.FC<PeopleModulePageProps> = ({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     setFormError('');
     for (const cf of moduleCustomFields) {
       if (cf.required && !String(customValues[cf.field_key] || '').trim()) {
@@ -187,32 +195,25 @@ export const PeopleModulePage: React.FC<PeopleModulePageProps> = ({
 
     setSaving(true);
     try {
-      const payload = {
-        first_name: firstName,
-        last_name: lastName,
-        ci,
-        department_id: Number(departmentId),
-        district_id: Number(districtId),
-        seccional_number: Number(seccionalNumber),
-        phone,
-        registered_at: registeredAt,
-        notes,
-        consent_accepted: consentAccepted,
-        custom_fields: customValues,
-      };
-      if (editing) {
-        await apiFetch(`/api/people/${moduleKey}/${editing.id}`, {
-          method: 'PUT',
-          body: JSON.stringify(payload),
-        });
-        notify(`${singularLabel} actualizado correctamente.`);
-      } else {
-        await apiFetch(`/api/people/${moduleKey}`, {
-          method: 'POST',
-          body: JSON.stringify(payload),
-        });
-        notify(`${singularLabel} registrado correctamente.`);
-      }
+      await savePerson(
+        user,
+        moduleKey,
+        {
+          first_name: firstName,
+          last_name: lastName,
+          ci,
+          department_id: departmentId,
+          district_id: districtId,
+          seccional_number: Number(seccionalNumber),
+          phone,
+          registered_at: registeredAt,
+          notes,
+          consent_accepted: consentAccepted,
+          custom_fields: customValues,
+        },
+        editing?.id
+      );
+      notify(editing ? `${singularLabel} actualizado correctamente.` : `${singularLabel} registrado correctamente.`);
       setModalOpen(false);
       await loadData();
     } catch (err: unknown) {
@@ -223,9 +224,9 @@ export const PeopleModulePage: React.FC<PeopleModulePageProps> = ({
   };
 
   const handleDelete = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || !user) return;
     try {
-      await apiFetch(`/api/people/${moduleKey}/${deleteTarget.id}`, { method: 'DELETE' });
+      await deletePerson(user, moduleKey, deleteTarget.id, `${deleteTarget.first_name} ${deleteTarget.last_name}`);
       notify(`${singularLabel} eliminado del sistema.`);
       setDeleteTarget(null);
       await loadData();
@@ -235,12 +236,21 @@ export const PeopleModulePage: React.FC<PeopleModulePageProps> = ({
   };
 
   const fetchAllFiltered = async () => {
-    const qs = new URLSearchParams({ page: '1', limit: '200' });
-    if (search.trim()) qs.set('search', search.trim());
-    if (filterDept) qs.set('department_id', filterDept);
-    if (filterDist) qs.set('district_id', filterDist);
-    if (filterSecc.trim()) qs.set('seccional_number', filterSecc.trim());
-    const res = await apiFetch<PeopleResponse>(`/api/people/${moduleKey}?${qs.toString()}`);
+    if (!user) return [];
+    const res = await listPeople(
+      user,
+      moduleKey,
+      {
+        search: search.trim() || undefined,
+        department_id: filterDept || undefined,
+        district_id: filterDist || undefined,
+        seccional_number: filterSecc.trim() || undefined,
+        page: 1,
+        limit: 2000,
+      },
+      territorialMaps,
+      canViewSensitive
+    );
     return res.items;
   };
 
@@ -665,15 +675,15 @@ export const PeopleModulePage: React.FC<PeopleModulePageProps> = ({
                       const nextDept = e.target.value;
                       setDepartmentId(nextDept);
                       const firstDist = districts.find(
-                        (d) => d.department_id === Number(nextDept) && d.active === 1
+                        (d) => d.department_id === nextDept && d.active
                       );
-                      setDistrictId(firstDist ? String(firstDist.id) : '');
+                      setDistrictId(firstDist ? firstDist.id : '');
                     }}
                     className="w-full min-h-[42px] rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white"
                   >
                     <option value="">Seleccionar departamento</option>
                     {departments
-                      .filter((d) => d.active === 1)
+                      .filter((d) => d.active)
                       .map((d) => (
                         <option key={d.id} value={d.id}>
                           {d.name}
@@ -733,13 +743,7 @@ export const PeopleModulePage: React.FC<PeopleModulePageProps> = ({
               {moduleCustomFields.length > 0 && (
                 <div className="pt-2 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {moduleCustomFields.map((cf) => {
-                    const opts = (() => {
-                      try {
-                        return JSON.parse(cf.options_json || '[]') as string[];
-                      } catch {
-                        return [];
-                      }
-                    })();
+                    const opts = cf.options || [];
                     return (
                       <div key={cf.id} className={cf.field_type === 'textarea' ? 'sm:col-span-2' : ''}>
                         <label className="block text-xs font-semibold text-slate-700 mb-1">

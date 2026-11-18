@@ -1,0 +1,598 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net (Default-Deny Catch-All)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Phase 3: Global Hardened Primitives ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerified() && request.auth.token.email == 'luistreviso@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isVerified() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role_slug in ['super_admin', 'admin'] &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true
+      );
+    }
+
+    function isAuthorizedWriter() {
+      return isBootstrappedAdmin() || (
+        isVerified() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role_slug in ['super_admin', 'admin', 'coordinator'] &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true
+      );
+    }
+
+    function isActiveMember() {
+      return isBootstrappedAdmin() || (
+        isVerified() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true
+      );
+    }
+
+    function isOwner() {
+      return isVerified() && existing().ownerUid == request.auth.uid;
+    }
+
+    // --- Validation Blueprints (Phase 4) ---
+
+    function isValidPublicBranding(data) {
+      return data.keys().hasAll(['platform_name', 'organization_name', 'primary_color', 'secondary_color', 'ownerUid', 'updatedAt'])
+        && data.keys().hasOnly([
+          'platform_name', 'organization_name', 'campaign_reference', 'logo_url', 'institutional_image_url',
+          'primary_color', 'secondary_color', 'theme_mode', 'background_color', 'surface_color', 'text_color',
+          'font_family', 'font_size_scale', 'border_radius', 'institutional_text', 'ownerUid', 'updatedAt'
+        ])
+        && data.platform_name is string && data.platform_name.size() >= 1 && data.platform_name.size() <= 120
+        && data.organization_name is string && data.organization_name.size() >= 1 && data.organization_name.size() <= 140
+        && (!('campaign_reference' in data) || (data.campaign_reference is string && data.campaign_reference.size() <= 80))
+        && (!('logo_url' in data) || (data.logo_url is string && data.logo_url.size() <= 500000))
+        && (!('institutional_image_url' in data) || (data.institutional_image_url is string && data.institutional_image_url.size() <= 500000))
+        && data.primary_color is string && data.primary_color.size() == 7 && data.primary_color.matches('^#[0-9A-Fa-f]{6}$')
+        && data.secondary_color is string && data.secondary_color.size() == 7 && data.secondary_color.matches('^#[0-9A-Fa-f]{6}$')
+        && (!('theme_mode' in data) || (data.theme_mode is string && data.theme_mode in ['light', 'dark', 'custom']))
+        && (!('background_color' in data) || (data.background_color is string && data.background_color.size() == 7 && data.background_color.matches('^#[0-9A-Fa-f]{6}$')))
+        && (!('surface_color' in data) || (data.surface_color is string && data.surface_color.size() == 7 && data.surface_color.matches('^#[0-9A-Fa-f]{6}$')))
+        && (!('text_color' in data) || (data.text_color is string && data.text_color.size() == 7 && data.text_color.matches('^#[0-9A-Fa-f]{6}$')))
+        && (!('font_family' in data) || (data.font_family is string && data.font_family.size() <= 60))
+        && (!('font_size_scale' in data) || (data.font_size_scale is string && data.font_size_scale in ['compact', 'normal', 'large']))
+        && (!('border_radius' in data) || (data.border_radius is string && data.border_radius in ['sharp', 'rounded', 'soft']))
+        && (!('institutional_text' in data) || (data.institutional_text is string && data.institutional_text.size() <= 600))
+        && isValidId(data.ownerUid)
+        && data.updatedAt == request.time;
+    }
+
+    function isValidSystemSettings(data) {
+      return data.keys().hasAll([
+          'platform_name', 'organization_name', 'primary_color', 'secondary_color',
+          'document_format', 'date_format', 'ownerUid', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'platform_name', 'organization_name', 'campaign_reference', 'logo_url', 'institutional_image_url',
+          'primary_color', 'secondary_color', 'theme_mode', 'background_color', 'surface_color', 'text_color',
+          'font_family', 'font_size_scale', 'border_radius', 'header_text', 'footer_text', 'institutional_text',
+          'contact_phone', 'contact_email', 'contact_address', 'document_format', 'date_format',
+          'report_show_charts', 'report_show_totals', 'ownerUid', 'createdAt', 'updatedAt'
+        ])
+        && data.platform_name is string && data.platform_name.size() >= 1 && data.platform_name.size() <= 120
+        && data.organization_name is string && data.organization_name.size() >= 1 && data.organization_name.size() <= 140
+        && (!('campaign_reference' in data) || (data.campaign_reference is string && data.campaign_reference.size() <= 80))
+        && (!('logo_url' in data) || (data.logo_url is string && data.logo_url.size() <= 500000))
+        && (!('institutional_image_url' in data) || (data.institutional_image_url is string && data.institutional_image_url.size() <= 500000))
+        && data.primary_color is string && data.primary_color.size() == 7 && data.primary_color.matches('^#[0-9A-Fa-f]{6}$')
+        && data.secondary_color is string && data.secondary_color.size() == 7 && data.secondary_color.matches('^#[0-9A-Fa-f]{6}$')
+        && (!('theme_mode' in data) || (data.theme_mode is string && data.theme_mode in ['light', 'dark', 'custom']))
+        && (!('background_color' in data) || (data.background_color is string && data.background_color.size() == 7 && data.background_color.matches('^#[0-9A-Fa-f]{6}$')))
+        && (!('surface_color' in data) || (data.surface_color is string && data.surface_color.size() == 7 && data.surface_color.matches('^#[0-9A-Fa-f]{6}$')))
+        && (!('text_color' in data) || (data.text_color is string && data.text_color.size() == 7 && data.text_color.matches('^#[0-9A-Fa-f]{6}$')))
+        && (!('font_family' in data) || (data.font_family is string && data.font_family.size() <= 60))
+        && (!('font_size_scale' in data) || (data.font_size_scale is string && data.font_size_scale in ['compact', 'normal', 'large']))
+        && (!('border_radius' in data) || (data.border_radius is string && data.border_radius in ['sharp', 'rounded', 'soft']))
+        && (!('header_text' in data) || (data.header_text is string && data.header_text.size() <= 200))
+        && (!('footer_text' in data) || (data.footer_text is string && data.footer_text.size() <= 240))
+        && (!('institutional_text' in data) || (data.institutional_text is string && data.institutional_text.size() <= 600))
+        && (!('contact_phone' in data) || (data.contact_phone is string && data.contact_phone.size() <= 40))
+        && (!('contact_email' in data) || (data.contact_email is string && data.contact_email.size() <= 120))
+        && (!('contact_address' in data) || (data.contact_address is string && data.contact_address.size() <= 180))
+        && data.document_format is string && data.document_format in ['A4', 'LETTER']
+        && data.date_format is string && data.date_format in ['DD/MM/YYYY', 'YYYY-MM-DD']
+        && (!('report_show_charts' in data) || data.report_show_charts is bool)
+        && (!('report_show_totals' in data) || data.report_show_totals is bool)
+        && isValidId(data.ownerUid)
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'username', 'full_name', 'email', 'role_slug', 'role_name', 'active', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'uid', 'username', 'full_name', 'email', 'role_slug', 'role_name',
+          'active', 'custom_permissions', 'last_login_at', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.uid)
+        && data.username is string && data.username.size() >= 2 && data.username.size() <= 60
+        && data.full_name is string && data.full_name.size() >= 2 && data.full_name.size() <= 120
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 160
+        && data.role_slug is string && data.role_slug in ['super_admin', 'admin', 'coordinator', 'viewer']
+        && data.role_name is string && data.role_name.size() >= 2 && data.role_name.size() <= 60
+        && data.active is bool
+        && (!('custom_permissions' in data) || data.custom_permissions is map)
+        && (!('last_login_at' in data) || (data.last_login_at is string && data.last_login_at.size() <= 40))
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isValidUserInvite(data) {
+      return data.keys().hasAll(['username', 'full_name', 'email', 'role_slug', 'role_name', 'active', 'ownerUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'username', 'full_name', 'email', 'role_slug', 'role_name',
+          'active', 'custom_permissions', 'ownerUid', 'createdAt', 'updatedAt'
+        ])
+        && data.username is string && data.username.size() >= 2 && data.username.size() <= 60
+        && data.full_name is string && data.full_name.size() >= 2 && data.full_name.size() <= 120
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 160
+        && data.role_slug is string && data.role_slug in ['super_admin', 'admin', 'coordinator', 'viewer']
+        && data.role_name is string && data.role_name.size() >= 2 && data.role_name.size() <= 60
+        && data.active is bool
+        && (!('custom_permissions' in data) || data.custom_permissions is map)
+        && isValidId(data.ownerUid)
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isValidDepartment(data) {
+      return data.keys().hasAll(['code', 'name', 'active', 'ownerUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['code', 'name', 'active', 'ownerUid', 'createdAt', 'updatedAt'])
+        && data.code is string && data.code.size() >= 1 && data.code.size() <= 10
+        && data.name is string && data.name.size() >= 2 && data.name.size() <= 80
+        && data.active is bool
+        && isValidId(data.ownerUid)
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isValidDistrict(data) {
+      return data.keys().hasAll(['department_id', 'name', 'active', 'ownerUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['department_id', 'name', 'active', 'ownerUid', 'createdAt', 'updatedAt'])
+        && isValidId(data.department_id)
+        && data.name is string && data.name.size() >= 2 && data.name.size() <= 100
+        && data.active is bool
+        && isValidId(data.ownerUid)
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isValidSeccional(data) {
+      return data.keys().hasAll(['department_id', 'district_id', 'number', 'active', 'ownerUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['department_id', 'district_id', 'number', 'name', 'active', 'ownerUid', 'createdAt', 'updatedAt'])
+        && isValidId(data.department_id)
+        && isValidId(data.district_id)
+        && data.number is int && data.number >= 1 && data.number <= 99999
+        && (!('name' in data) || (data.name is string && data.name.size() <= 120))
+        && data.active is bool
+        && isValidId(data.ownerUid)
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isValidPersonRecord(data) {
+      return data.keys().hasAll([
+          'first_name', 'last_name', 'ci', 'department_id', 'district_id',
+          'seccional_number', 'phone', 'registered_at', 'consent_accepted', 'ownerUid', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'first_name', 'last_name', 'ci', 'department_id', 'district_id',
+          'seccional_number', 'phone', 'registered_at', 'notes', 'consent_accepted',
+          'custom_fields', 'ownerUid', 'createdAt', 'updatedAt'
+        ])
+        && data.first_name is string && data.first_name.size() >= 1 && data.first_name.size() <= 80
+        && data.last_name is string && data.last_name.size() >= 1 && data.last_name.size() <= 80
+        && data.ci is string && data.ci.size() >= 4 && data.ci.size() <= 20
+        && isValidId(data.department_id)
+        && isValidId(data.district_id)
+        && data.seccional_number is int && data.seccional_number >= 1 && data.seccional_number <= 99999
+        && data.phone is string && data.phone.size() >= 6 && data.phone.size() <= 30
+        && data.registered_at is string && data.registered_at.size() == 10 && data.registered_at.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000))
+        && data.consent_accepted is bool && data.consent_accepted == true
+        && (!('custom_fields' in data) || data.custom_fields is map)
+        && isValidId(data.ownerUid)
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isValidOnpRecord(data) {
+      return data.keys().hasAll(['full_name', 'phone', 'organization', 'registered_at', 'ownerUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['full_name', 'phone', 'organization', 'registered_at', 'notes', 'custom_fields', 'ownerUid', 'createdAt', 'updatedAt'])
+        && data.full_name is string && data.full_name.size() >= 2 && data.full_name.size() <= 140
+        && data.phone is string && data.phone.size() >= 6 && data.phone.size() <= 30
+        && data.organization is string && data.organization.size() >= 2 && data.organization.size() <= 160
+        && data.registered_at is string && data.registered_at.size() == 10 && data.registered_at.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000))
+        && (!('custom_fields' in data) || data.custom_fields is map)
+        && isValidId(data.ownerUid)
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isValidVoteProjection(data) {
+      return data.keys().hasAll([
+          'coordinator_id', 'department_id', 'district_id', 'seccional_number',
+          'estimated_votes', 'responsible_name', 'ownerUid', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'coordinator_id', 'department_id', 'district_id', 'seccional_number',
+          'estimated_votes', 'responsible_name', 'notes', 'custom_fields', 'ownerUid', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.coordinator_id)
+        && isValidId(data.department_id)
+        && isValidId(data.district_id)
+        && data.seccional_number is int && data.seccional_number >= 1 && data.seccional_number <= 99999
+        && data.estimated_votes is int && data.estimated_votes >= 0 && data.estimated_votes <= 10000000
+        && data.responsible_name is string && data.responsible_name.size() >= 2 && data.responsible_name.size() <= 120
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000))
+        && (!('custom_fields' in data) || data.custom_fields is map)
+        && isValidId(data.ownerUid)
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isValidAgendaEvent(data) {
+      return data.keys().hasAll([
+          'title', 'event_type', 'event_date', 'start_time', 'end_time',
+          'reminder_minutes', 'status', 'ownerUid', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'title', 'event_type', 'event_date', 'start_time', 'end_time',
+          'department_id', 'district_id', 'seccional_number', 'location', 'responsible',
+          'participants', 'description', 'notes', 'reminder_minutes', 'status',
+          'activity_summary', 'attendance_count', 'activity_outcomes', 'custom_fields',
+          'ownerUid', 'createdAt', 'updatedAt'
+        ])
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 180
+        && data.event_type is string && data.event_type.size() >= 2 && data.event_type.size() <= 80
+        && data.event_date is string && data.event_date.size() == 10 && data.event_date.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.start_time is string && data.start_time.size() == 5 && data.start_time.matches('^\\d{2}:\\d{2}$')
+        && data.end_time is string && data.end_time.size() == 5 && data.end_time.matches('^\\d{2}:\\d{2}$')
+        && (!('department_id' in data) || data.department_id == null || isValidId(data.department_id))
+        && (!('district_id' in data) || data.district_id == null || isValidId(data.district_id))
+        && (!('seccional_number' in data) || data.seccional_number == null || (data.seccional_number is int && data.seccional_number >= 1))
+        && (!('location' in data) || (data.location is string && data.location.size() <= 200))
+        && (!('responsible' in data) || (data.responsible is string && data.responsible.size() <= 120))
+        && (!('participants' in data) || (data.participants is string && data.participants.size() <= 400))
+        && (!('description' in data) || (data.description is string && data.description.size() <= 1200))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000))
+        && data.reminder_minutes is int && data.reminder_minutes >= 0 && data.reminder_minutes <= 10080
+        && data.status is string && data.status in ['programado', 'realizado', 'cancelado']
+        && (!('activity_summary' in data) || (data.activity_summary is string && data.activity_summary.size() <= 1200))
+        && (!('attendance_count' in data) || (data.attendance_count is int && data.attendance_count >= 0 && data.attendance_count <= 1000000))
+        && (!('activity_outcomes' in data) || (data.activity_outcomes is string && data.activity_outcomes.size() <= 1200))
+        && (!('custom_fields' in data) || data.custom_fields is map)
+        && isValidId(data.ownerUid)
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isValidCustomField(data) {
+      return data.keys().hasAll(['module', 'field_key', 'label', 'field_type', 'required', 'active', 'sort_order', 'options', 'ownerUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['module', 'field_key', 'label', 'field_type', 'required', 'active', 'sort_order', 'options', 'ownerUid', 'createdAt', 'updatedAt'])
+        && data.module is string && data.module in ['coordinators', 'youth', 'women', 'onp', 'projections', 'agenda']
+        && data.field_key is string && data.field_key.size() >= 1 && data.field_key.size() <= 64 && data.field_key.matches('^[a-z0-9_]+$')
+        && data.label is string && data.label.size() >= 1 && data.label.size() <= 80
+        && data.field_type is string && data.field_type in ['text', 'number', 'select', 'date', 'textarea']
+        && data.required is bool
+        && data.active is bool
+        && data.sort_order is int && data.sort_order >= 0 && data.sort_order <= 1000
+        && data.options is list && data.options.size() <= 30 && (data.options.size() == 0 || (data.options[0] is string && data.options[0].size() <= 80))
+        && isValidId(data.ownerUid)
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isValidSavedReport(data) {
+      return data.keys().hasAll(['title', 'report_type', 'filters', 'columns', 'generated_by', 'ownerUid', 'createdAt'])
+        && data.keys().hasOnly(['title', 'report_type', 'filters', 'columns', 'generated_by', 'ownerUid', 'createdAt'])
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 120
+        && data.report_type is string && data.report_type.size() >= 1 && data.report_type.size() <= 40
+        && data.filters is map
+        && data.columns is list && data.columns.size() >= 1 && data.columns.size() <= 25 && data.columns[0] is string && data.columns[0].size() <= 60
+        && data.generated_by is string && data.generated_by.size() >= 1 && data.generated_by.size() <= 80
+        && isValidId(data.ownerUid)
+        && data.createdAt == request.time;
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['user_uid', 'username', 'action', 'module', 'ownerUid', 'createdAt'])
+        && data.keys().hasOnly(['user_uid', 'username', 'action', 'module', 'entity_id', 'details', 'ownerUid', 'createdAt'])
+        && isValidId(data.user_uid)
+        && data.username is string && data.username.size() >= 1 && data.username.size() <= 80
+        && data.action is string && data.action.size() >= 1 && data.action.size() <= 40
+        && data.module is string && data.module.size() >= 1 && data.module.size() <= 40
+        && (!('entity_id' in data) || (data.entity_id is string && data.entity_id.size() <= 128))
+        && (!('details' in data) || (data.details is string && data.details.size() <= 500))
+        && isValidId(data.ownerUid)
+        && data.createdAt == request.time;
+    }
+
+    // --- Collection Rules ---
+
+    // Connectivity health-check document
+    match /test/{docId} {
+      allow get: if isValidId(docId) && docId == 'connection';
+    }
+
+    // Public non-PII branding for login screen
+    match /public_branding/{docId} {
+      allow get: if isValidId(docId) && docId == 'main';
+      allow create, update: if isValidId(docId) && docId == 'main' && isAdmin() && isValidPublicBranding(incoming())
+        && incoming().ownerUid == request.auth.uid;
+      allow delete: if false;
+    }
+
+    // Full System Settings
+    match /system_settings/{docId} {
+      allow get: if isValidId(docId) && docId == 'main' && (isActiveMember() || isOwner());
+      allow list: if isBootstrappedAdmin() || (isVerified() && existing().ownerUid == request.auth.uid);
+      allow create: if isValidId(docId) && docId == 'main' && isAdmin() && isValidSystemSettings(incoming())
+        && incoming().ownerUid == request.auth.uid && incoming().createdAt == request.time;
+      allow update: if isValidId(docId) && docId == 'main' && isAdmin() && isValidSystemSettings(incoming())
+        && incoming().ownerUid == existing().ownerUid && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'platform_name', 'organization_name', 'campaign_reference', 'logo_url', 'institutional_image_url',
+          'primary_color', 'secondary_color', 'theme_mode', 'background_color', 'surface_color', 'text_color',
+          'font_family', 'font_size_scale', 'border_radius', 'header_text', 'footer_text', 'institutional_text',
+          'contact_phone', 'contact_email', 'contact_address', 'document_format', 'date_format',
+          'report_show_charts', 'report_show_totals', 'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+
+    // User Profiles (PII protected)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isAdmin() || (isVerified() && request.auth.uid == userId));
+      allow list: if isBootstrappedAdmin() || (isVerified() && existing().uid == request.auth.uid);
+      allow create: if isValidId(userId) && isVerified() && isValidUserProfile(incoming())
+        && incoming().uid == userId
+        && incoming().createdAt == request.time
+        && (
+          isBootstrappedAdmin() ||
+          (
+            userId == request.auth.uid &&
+            incoming().email == request.auth.token.email &&
+            incoming().role_slug == 'viewer' &&
+            incoming().active == false &&
+            (!('custom_permissions' in incoming()) || incoming().custom_permissions.size() == 0)
+          )
+        );
+      allow update: if isValidId(userId) && isVerified() && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && (
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
+            'username', 'full_name', 'email', 'role_slug', 'role_name', 'active', 'custom_permissions', 'last_login_at', 'updatedAt'
+          ])) ||
+          (request.auth.uid == userId && incoming().diff(existing()).affectedKeys().hasOnly(['full_name', 'last_login_at', 'updatedAt']))
+        );
+      allow delete: if isValidId(userId) && isAdmin() && userId != request.auth.uid;
+    }
+
+    // Team Invites (PII protected)
+    match /user_invites/{inviteId} {
+      allow get: if isValidId(inviteId) && (isAdmin() || (isVerified() && existing().email == request.auth.token.email));
+      allow list: if isBootstrappedAdmin() || (isVerified() && existing().email == request.auth.token.email);
+      allow create: if isValidId(inviteId) && isAdmin() && isValidUserInvite(incoming())
+        && incoming().ownerUid == request.auth.uid && incoming().createdAt == request.time;
+      allow update: if isValidId(inviteId) && isAdmin() && isValidUserInvite(incoming())
+        && incoming().ownerUid == existing().ownerUid && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'username', 'full_name', 'email', 'role_slug', 'role_name', 'active', 'custom_permissions', 'updatedAt'
+        ]);
+      allow delete: if isValidId(inviteId) && isAdmin();
+    }
+
+    // Territorial: Departments
+    match /departments/{departmentId} {
+      allow get: if isValidId(departmentId) && (isActiveMember() || isOwner());
+      allow list: if isBootstrappedAdmin() || (isVerified() && (existing().ownerUid == request.auth.uid || existing().active == true));
+      allow create: if isValidId(departmentId) && isAdmin() && isValidDepartment(incoming())
+        && incoming().ownerUid == request.auth.uid && incoming().createdAt == request.time;
+      allow update: if isValidId(departmentId) && isAdmin() && isValidDepartment(incoming())
+        && incoming().ownerUid == existing().ownerUid && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['code', 'name', 'active', 'updatedAt']);
+      allow delete: if isValidId(departmentId) && isAdmin();
+    }
+
+    // Territorial: Districts
+    match /districts/{districtId} {
+      allow get: if isValidId(districtId) && (isActiveMember() || isOwner());
+      allow list: if isBootstrappedAdmin() || (isVerified() && (existing().ownerUid == request.auth.uid || existing().active == true));
+      allow create: if isValidId(districtId) && isAdmin() && isValidDistrict(incoming())
+        && incoming().ownerUid == request.auth.uid && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/departments/$(incoming().department_id));
+      allow update: if isValidId(districtId) && isAdmin() && isValidDistrict(incoming())
+        && incoming().ownerUid == existing().ownerUid && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['department_id', 'name', 'active', 'updatedAt']);
+      allow delete: if isValidId(districtId) && isAdmin();
+    }
+
+    // Territorial: Seccionales
+    match /seccionales/{seccionalId} {
+      allow get: if isValidId(seccionalId) && (isActiveMember() || isOwner());
+      allow list: if isBootstrappedAdmin() || (isVerified() && (existing().ownerUid == request.auth.uid || existing().active == true));
+      allow create: if isValidId(seccionalId) && isAdmin() && isValidSeccional(incoming())
+        && incoming().ownerUid == request.auth.uid && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/departments/$(incoming().department_id))
+        && exists(/databases/$(database)/documents/districts/$(incoming().district_id));
+      allow update: if isValidId(seccionalId) && isAdmin() && isValidSeccional(incoming())
+        && incoming().ownerUid == existing().ownerUid && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['department_id', 'district_id', 'number', 'name', 'active', 'updatedAt']);
+      allow delete: if isValidId(seccionalId) && isAdmin();
+    }
+
+    // People Modules (PII Protected): Coordinators, Youth, Women
+    match /coordinators/{personId} {
+      allow get: if isValidId(personId) && (isAdmin() || isOwner());
+      allow list: if isBootstrappedAdmin() || (isVerified() && existing().ownerUid == request.auth.uid);
+      allow create: if isValidId(personId) && isAuthorizedWriter() && isValidPersonRecord(incoming())
+        && incoming().ownerUid == request.auth.uid && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/departments/$(incoming().department_id))
+        && exists(/databases/$(database)/documents/districts/$(incoming().district_id));
+      allow update: if isValidId(personId) && isAuthorizedWriter() && isValidPersonRecord(incoming())
+        && (isAdmin() || isOwner())
+        && incoming().ownerUid == existing().ownerUid && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'first_name', 'last_name', 'ci', 'department_id', 'district_id',
+          'seccional_number', 'phone', 'registered_at', 'notes', 'consent_accepted', 'custom_fields', 'updatedAt'
+        ]);
+      allow delete: if isValidId(personId) && (isAdmin() || isOwner());
+    }
+
+    match /youth_members/{personId} {
+      allow get: if isValidId(personId) && (isAdmin() || isOwner());
+      allow list: if isBootstrappedAdmin() || (isVerified() && existing().ownerUid == request.auth.uid);
+      allow create: if isValidId(personId) && isAuthorizedWriter() && isValidPersonRecord(incoming())
+        && incoming().ownerUid == request.auth.uid && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/departments/$(incoming().department_id))
+        && exists(/databases/$(database)/documents/districts/$(incoming().district_id));
+      allow update: if isValidId(personId) && isAuthorizedWriter() && isValidPersonRecord(incoming())
+        && (isAdmin() || isOwner())
+        && incoming().ownerUid == existing().ownerUid && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'first_name', 'last_name', 'ci', 'department_id', 'district_id',
+          'seccional_number', 'phone', 'registered_at', 'notes', 'consent_accepted', 'custom_fields', 'updatedAt'
+        ]);
+      allow delete: if isValidId(personId) && (isAdmin() || isOwner());
+    }
+
+    match /women_members/{personId} {
+      allow get: if isValidId(personId) && (isAdmin() || isOwner());
+      allow list: if isBootstrappedAdmin() || (isVerified() && existing().ownerUid == request.auth.uid);
+      allow create: if isValidId(personId) && isAuthorizedWriter() && isValidPersonRecord(incoming())
+        && incoming().ownerUid == request.auth.uid && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/departments/$(incoming().department_id))
+        && exists(/databases/$(database)/documents/districts/$(incoming().district_id));
+      allow update: if isValidId(personId) && isAuthorizedWriter() && isValidPersonRecord(incoming())
+        && (isAdmin() || isOwner())
+        && incoming().ownerUid == existing().ownerUid && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'first_name', 'last_name', 'ci', 'department_id', 'district_id',
+          'seccional_number', 'phone', 'registered_at', 'notes', 'consent_accepted', 'custom_fields', 'updatedAt'
+        ]);
+      allow delete: if isValidId(personId) && (isAdmin() || isOwner());
+    }
+
+    // ONP Members (PII Protected)
+    match /onp_members/{onpId} {
+      allow get: if isValidId(onpId) && (isAdmin() || isOwner());
+      allow list: if isBootstrappedAdmin() || (isVerified() && existing().ownerUid == request.auth.uid);
+      allow create: if isValidId(onpId) && isAuthorizedWriter() && isValidOnpRecord(incoming())
+        && incoming().ownerUid == request.auth.uid && incoming().createdAt == request.time;
+      allow update: if isValidId(onpId) && isAuthorizedWriter() && isValidOnpRecord(incoming())
+        && (isAdmin() || isOwner())
+        && incoming().ownerUid == existing().ownerUid && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'full_name', 'phone', 'organization', 'registered_at', 'notes', 'custom_fields', 'updatedAt'
+        ]);
+      allow delete: if isValidId(onpId) && (isAdmin() || isOwner());
+    }
+
+    // Vote Projections (Relational Integrity with Coordinators)
+    match /vote_projections/{projectionId} {
+      allow get: if isValidId(projectionId) && (isAdmin() || isOwner());
+      allow list: if isBootstrappedAdmin() || (isVerified() && existing().ownerUid == request.auth.uid);
+      allow create: if isValidId(projectionId) && isAuthorizedWriter() && isValidVoteProjection(incoming())
+        && incoming().ownerUid == request.auth.uid && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/coordinators/$(incoming().coordinator_id))
+        && exists(/databases/$(database)/documents/departments/$(incoming().department_id))
+        && exists(/databases/$(database)/documents/districts/$(incoming().district_id));
+      allow update: if isValidId(projectionId) && isAuthorizedWriter() && isValidVoteProjection(incoming())
+        && (isAdmin() || isOwner())
+        && incoming().ownerUid == existing().ownerUid && incoming().createdAt == existing().createdAt
+        && incoming().coordinator_id == existing().coordinator_id
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'department_id', 'district_id', 'seccional_number', 'estimated_votes', 'responsible_name', 'notes', 'custom_fields', 'updatedAt'
+        ]);
+      allow delete: if isValidId(projectionId) && (isAdmin() || isOwner());
+    }
+
+    // Agenda Events (With Terminal State Locking)
+    match /agenda_events/{eventId} {
+      allow get: if isValidId(eventId) && (isAdmin() || isOwner());
+      allow list: if isBootstrappedAdmin() || (isVerified() && existing().ownerUid == request.auth.uid);
+      allow create: if isValidId(eventId) && isAuthorizedWriter() && isValidAgendaEvent(incoming())
+        && incoming().ownerUid == request.auth.uid && incoming().createdAt == request.time;
+      allow update: if isValidId(eventId) && isAuthorizedWriter() && isValidAgendaEvent(incoming())
+        && incoming().ownerUid == existing().ownerUid && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'event_type', 'event_date', 'start_time', 'end_time',
+          'department_id', 'district_id', 'seccional_number', 'location', 'responsible',
+          'participants', 'description', 'notes', 'reminder_minutes', 'status',
+          'activity_summary', 'attendance_count', 'activity_outcomes', 'custom_fields', 'updatedAt'
+        ])
+        && (isAdmin() || (isOwner() && existing().status == 'programado'));
+      allow delete: if isValidId(eventId) && (isAdmin() || isOwner());
+    }
+
+    // Custom Fields
+    match /custom_fields/{fieldId} {
+      allow get: if isValidId(fieldId) && (isActiveMember() || isOwner());
+      allow list: if isBootstrappedAdmin() || (isVerified() && (existing().ownerUid == request.auth.uid || existing().active == true));
+      allow create: if isValidId(fieldId) && isAdmin() && isValidCustomField(incoming())
+        && incoming().ownerUid == request.auth.uid && incoming().createdAt == request.time;
+      allow update: if isValidId(fieldId) && isAdmin() && isValidCustomField(incoming())
+        && incoming().ownerUid == existing().ownerUid && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'label', 'field_type', 'required', 'active', 'sort_order', 'options', 'updatedAt'
+        ]);
+      allow delete: if isValidId(fieldId) && isAdmin();
+    }
+
+    // Saved Reports
+    match /saved_reports/{reportId} {
+      allow get: if isValidId(reportId) && (isAdmin() || isOwner());
+      allow list: if isBootstrappedAdmin() || (isVerified() && existing().ownerUid == request.auth.uid);
+      allow create: if isValidId(reportId) && isVerified() && isValidSavedReport(incoming())
+        && incoming().ownerUid == request.auth.uid && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(reportId) && (isAdmin() || isOwner());
+    }
+
+    // Audit Logs (Strictly Append-Only)
+    match /audit_logs/{logId} {
+      allow get: if isValidId(logId) && isAdmin();
+      allow list: if isBootstrappedAdmin() || (isVerified() && existing().ownerUid == request.auth.uid);
+      allow create: if isValidId(logId) && isVerified() && isValidAuditLog(incoming())
+        && incoming().ownerUid == request.auth.uid && incoming().user_uid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+  }
+}

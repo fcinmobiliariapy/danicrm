@@ -17,8 +17,25 @@ import {
 import React, { useCallback, useEffect, useState } from 'react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { useApp } from '../context/AppContext';
-import { apiFetch, formatDisplayDate } from '../lib/api';
-import { CustomField, SystemSettings } from '../types';
+import { formatDisplayDate } from '../lib/api';
+import {
+  createCustomField,
+  createUserInvite,
+  deleteAdminUser,
+  deleteCustomField,
+  deleteUserInvite,
+  exportFullBackup,
+  listAdminUsers,
+  listAuditLogs,
+  listCustomFields,
+  listUserInvites,
+  restoreFullBackup,
+  saveSystemSettings,
+  updateAdminUser,
+  updateCustomField,
+} from '../lib/firestoreService';
+import { ALL_PERMISSIONS, DEFAULT_ROLE_PERMISSION_KEYS, ROLES } from '../lib/rbac';
+import { AuditLogEntry, CustomField, RoleSlug, SystemSettings, User, UserInvite } from '../types';
 
 const THEME_PRESETS: {
   id: string;
@@ -85,46 +102,8 @@ const FONT_OPTIONS = [
   { value: 'Source Serif 4', label: 'Source Serif 4 (Documental Serif)' },
 ];
 
-interface RoleDef {
-  id: number;
-  slug: string;
-  name: string;
-  description: string;
-}
-
-interface PermDef {
-  id: number;
-  key: string;
-  module: string;
-  action: string;
-  label: string;
-}
-
-interface AdminUser {
-  id: number;
-  username: string;
-  full_name: string;
-  email: string;
-  role_id: number;
-  role_slug: string;
-  role_name: string;
-  active: number;
-  last_login_at: string | null;
-  custom_permissions: Record<string, boolean>;
-}
-
-interface AuditLogEntry {
-  id: number;
-  username: string;
-  action: string;
-  module: string;
-  entity_id: string;
-  details: string;
-  created_at: string;
-}
-
 export const AdminPage: React.FC = () => {
-  const { settings, refreshSettings, refreshCustomFields, refreshTerritorial, applyThemePreview, notify } = useApp();
+  const { user, settings, refreshSettings, refreshCustomFields, refreshTerritorial, applyThemePreview, notify } = useApp();
   const [tab, setTab] = useState<'general' | 'fields' | 'users' | 'security'>('general');
 
   // General settings state
@@ -147,21 +126,19 @@ export const AdminPage: React.FC = () => {
   const [newFieldReq, setNewFieldReq] = useState(false);
   const [newFieldOptions, setNewFieldOptions] = useState('');
 
-  // Users & Roles state
-  const [users, setUsers] = useState<AdminUser[]>([]);
-  const [roles, setRoles] = useState<RoleDef[]>([]);
-  const [permissions, setPermissions] = useState<PermDef[]>([]);
-  const [rolePerms, setRolePerms] = useState<{ role_id: number; permission_id: number }[]>([]);
+  // Users & Invites state
+  const [users, setUsers] = useState<User[]>([]);
+  const [invites, setInvites] = useState<UserInvite[]>([]);
   const [userModalOpen, setUserModalOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
   const [uUsername, setUUsername] = useState('');
   const [uFullName, setUFullName] = useState('');
   const [uEmail, setUEmail] = useState('');
-  const [uPassword, setUPassword] = useState('');
-  const [uRoleId, setURoleId] = useState('');
+  const [uRoleSlug, setURoleSlug] = useState<RoleSlug>('coordinator');
   const [uActive, setUActive] = useState(true);
   const [uCustomPerms, setUCustomPerms] = useState<Record<string, boolean>>({});
-  const [deleteUserTarget, setDeleteUserTarget] = useState<AdminUser | null>(null);
+  const [deleteUserTarget, setDeleteUserTarget] = useState<User | null>(null);
+  const [deleteInviteTarget, setDeleteInviteTarget] = useState<UserInvite | null>(null);
 
   // Audit & Backup state
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
@@ -172,29 +149,35 @@ export const AdminPage: React.FC = () => {
   }, [settings]);
 
   const loadAllFields = useCallback(async () => {
-    const res = await apiFetch<CustomField[]>('/api/custom-fields?all=1');
-    setAllFields(res);
-  }, []);
+    if (!user) return;
+    try {
+      const res = await listCustomFields(user, false);
+      setAllFields(res);
+    } catch (err: unknown) {
+      notify(err instanceof Error ? err.message : 'Error al cargar campos personalizados.', 'error');
+    }
+  }, [user, notify]);
 
   const loadUsersAndRoles = useCallback(async () => {
-    const [u, rp] = await Promise.all([
-      apiFetch<AdminUser[]>('/api/admin/users'),
-      apiFetch<{ roles: RoleDef[]; permissions: PermDef[]; rolePermissions: { role_id: number; permission_id: number }[] }>(
-        '/api/admin/roles'
-      ),
-    ]);
-    setUsers(u);
-    setRoles(rp.roles);
-    setPermissions(rp.permissions);
-    setRolePerms(rp.rolePermissions);
-  }, []);
+    if (!user) return;
+    try {
+      const [u, inv] = await Promise.all([listAdminUsers(user), listUserInvites(user)]);
+      setUsers(u);
+      setInvites(inv);
+    } catch (err: unknown) {
+      notify(err instanceof Error ? err.message : 'Error al cargar usuarios e invitaciones.', 'error');
+    }
+  }, [user, notify]);
 
   const loadAudit = useCallback(async () => {
-    const res = await apiFetch<AuditLogEntry[]>(
-      `/api/admin/audit-logs?search=${encodeURIComponent(auditSearch)}`
-    );
-    setAuditLogs(res);
-  }, [auditSearch]);
+    if (!user) return;
+    try {
+      const res = await listAuditLogs(user, auditSearch);
+      setAuditLogs(res);
+    } catch (err: unknown) {
+      notify(err instanceof Error ? err.message : 'Error al cargar auditoría.', 'error');
+    }
+  }, [user, auditSearch, notify]);
 
   useEffect(() => {
     if (tab === 'fields') loadAllFields();
@@ -204,12 +187,10 @@ export const AdminPage: React.FC = () => {
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     setSavingSettings(true);
     try {
-      await apiFetch('/api/settings', {
-        method: 'PUT',
-        body: JSON.stringify(formSettings),
-      });
+      await saveSystemSettings(user, formSettings);
       await refreshSettings();
       notify('Configuración general actualizada y aplicada.');
     } catch (err: unknown) {
@@ -224,6 +205,13 @@ export const AdminPage: React.FC = () => {
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === 'string') {
+        if (reader.result.length > 480000) {
+          notify(
+            'La imagen supera el límite de 480 KB permitido en base de datos. Seleccione una imagen más liviana.',
+            'error'
+          );
+          return;
+        }
         setFormSettings((prev) => ({ ...prev, [field]: reader.result as string }));
       }
     };
@@ -232,19 +220,17 @@ export const AdminPage: React.FC = () => {
 
   const handleCreateField = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     try {
-      await apiFetch('/api/custom-fields', {
-        method: 'POST',
-        body: JSON.stringify({
-          module: fieldModule,
-          label: newFieldLabel,
-          field_type: newFieldType,
-          required: newFieldReq,
-          options: newFieldOptions
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean),
-        }),
+      await createCustomField(user, {
+        module: fieldModule,
+        label: newFieldLabel,
+        field_type: newFieldType,
+        required: newFieldReq,
+        options: newFieldOptions
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
       });
       setNewFieldLabel('');
       setNewFieldOptions('');
@@ -257,13 +243,14 @@ export const AdminPage: React.FC = () => {
   };
 
   const handleReorderField = async (fields: CustomField[], idx: number, dir: -1 | 1) => {
+    if (!user) return;
     const targetIdx = idx + dir;
     if (targetIdx < 0 || targetIdx >= fields.length) return;
     const a = fields[idx];
     const b = fields[targetIdx];
     await Promise.all([
-      apiFetch(`/api/custom-fields/${a.id}`, { method: 'PUT', body: JSON.stringify({ sort_order: b.sort_order }) }),
-      apiFetch(`/api/custom-fields/${b.id}`, { method: 'PUT', body: JSON.stringify({ sort_order: a.sort_order }) }),
+      updateCustomField(user, a.id, { sort_order: b.sort_order }),
+      updateCustomField(user, b.id, { sort_order: a.sort_order }),
     ]);
     await Promise.all([loadAllFields(), refreshCustomFields()]);
   };
@@ -273,49 +260,47 @@ export const AdminPage: React.FC = () => {
     setUUsername('');
     setUFullName('');
     setUEmail('');
-    setUPassword('');
-    setURoleId(roles[2]?.id ? String(roles[2].id) : String(roles[0]?.id || ''));
+    setURoleSlug('coordinator');
     setUActive(true);
     setUCustomPerms({});
     setUserModalOpen(true);
   };
 
-  const openEditUser = (u: AdminUser) => {
+  const openEditUser = (u: User) => {
     setEditingUser(u);
     setUUsername(u.username);
     setUFullName(u.full_name);
     setUEmail(u.email || '');
-    setUPassword('');
-    setURoleId(String(u.role_id));
-    setUActive(!!u.active);
+    setURoleSlug(u.role_slug);
+    setUActive(Boolean(u.active));
     setUCustomPerms(u.custom_permissions || {});
     setUserModalOpen(true);
   };
 
   const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     try {
-      const payload = {
-        username: uUsername,
-        full_name: uFullName,
-        email: uEmail,
-        password: uPassword,
-        role_id: Number(uRoleId),
-        active: uActive,
-        custom_permissions: uCustomPerms,
-      };
       if (editingUser) {
-        await apiFetch(`/api/admin/users/${editingUser.id}`, {
-          method: 'PUT',
-          body: JSON.stringify(payload),
+        await updateAdminUser(user, editingUser.uid, {
+          username: uUsername,
+          full_name: uFullName,
+          email: uEmail,
+          role_slug: uRoleSlug,
+          active: uActive,
+          custom_permissions: uCustomPerms,
         });
         notify('Usuario y permisos actualizados.');
       } else {
-        await apiFetch('/api/admin/users', {
-          method: 'POST',
-          body: JSON.stringify(payload),
+        await createUserInvite(user, {
+          username: uUsername,
+          full_name: uFullName,
+          email: uEmail,
+          role_slug: uRoleSlug,
+          active: uActive,
+          custom_permissions: uCustomPerms,
         });
-        notify('Usuario creado correctamente.');
+        notify('Invitación de acceso con Google registrada.');
       }
       setUserModalOpen(false);
       await loadUsersAndRoles();
@@ -325,8 +310,9 @@ export const AdminPage: React.FC = () => {
   };
 
   const handleDownloadBackup = async () => {
+    if (!user) return;
     try {
-      const data = await apiFetch<Record<string, unknown>>('/api/admin/backup');
+      const data = await exportFullBackup(user);
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -342,15 +328,12 @@ export const AdminPage: React.FC = () => {
   };
 
   const handleRestoreBackup = async (file?: File) => {
-    if (!file) return;
+    if (!file || !user) return;
     try {
       const text = await file.text();
-      const parsed = JSON.parse(text);
-      await apiFetch('/api/admin/restore', {
-        method: 'POST',
-        body: JSON.stringify(parsed),
-      });
-      await Promise.all([refreshTerritorial(), refreshCustomFields(), loadAudit()]);
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      await restoreFullBackup(user, parsed);
+      await Promise.all([refreshSettings(), refreshTerritorial(), refreshCustomFields(), loadAudit()]);
       notify('Base de datos restaurada correctamente desde la copia de seguridad.');
     } catch (err: unknown) {
       notify(err instanceof Error ? err.message : 'Archivo de respaldo inválido.', 'error');
@@ -874,10 +857,8 @@ export const AdminPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={async () => {
-                          await apiFetch(`/api/custom-fields/${cf.id}`, {
-                            method: 'PUT',
-                            body: JSON.stringify({ active: cf.active ? 0 : 1 }),
-                          });
+                          if (!user) return;
+                          await updateCustomField(user, cf.id, { active: !cf.active });
                           await Promise.all([loadAllFields(), refreshCustomFields()]);
                         }}
                         className="rounded border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
@@ -887,7 +868,8 @@ export const AdminPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={async () => {
-                          await apiFetch(`/api/custom-fields/${cf.id}`, { method: 'DELETE' });
+                          if (!user) return;
+                          await deleteCustomField(user, cf.id);
                           await Promise.all([loadAllFields(), refreshCustomFields()]);
                           notify('Campo eliminado.');
                         }}
@@ -906,17 +888,22 @@ export const AdminPage: React.FC = () => {
 
       {/* Tab 3: Users & Permissions */}
       {tab === 'users' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-slate-900">Usuarios, Roles y Permisos Individuales</h2>
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">Usuarios, Roles y Permisos Individuales</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Los colaboradores ingresan mediante su cuenta de Google y requieren activación y rol asignado.
+              </p>
+            </div>
             <button
               type="button"
               onClick={openCreateUser}
               style={{ backgroundColor: settings.primary_color }}
-              className="min-h-[40px] inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold text-white"
+              className="min-h-[40px] inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold text-white shrink-0"
             >
               <UserPlus className="h-4 w-4" />
-              <span>Crear Usuario</span>
+              <span>Invitar Usuario</span>
             </button>
           </div>
 
@@ -944,7 +931,7 @@ export const AdminPage: React.FC = () => {
                       <td className="py-3 px-4 text-slate-700">{u.role_name}</td>
                       <td className="py-3 px-4 text-xs">
                         <span className={u.active ? 'text-emerald-700 font-semibold' : 'text-red-700 font-semibold'}>
-                          {u.active ? 'Activo' : 'Suspendido'}
+                          {u.active ? 'Activo' : 'Pendiente / Suspendido'}
                         </span>
                       </td>
                       <td className="py-3 px-4 text-xs font-mono text-slate-500">
@@ -962,8 +949,9 @@ export const AdminPage: React.FC = () => {
                           </button>
                           <button
                             type="button"
+                            disabled={u.uid === user?.uid}
                             onClick={() => setDeleteUserTarget(u)}
-                            className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-500 hover:bg-red-50 hover:text-red-700"
+                            className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-30 disabled:pointer-events-none"
                             title="Eliminar usuario"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -972,9 +960,71 @@ export const AdminPage: React.FC = () => {
                       </td>
                     </tr>
                   ))}
+                  {users.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-xs text-slate-500">
+                        No hay perfiles de usuario registrados en la base de datos.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/70 flex items-center justify-between">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-700">
+                Invitaciones Registradas ({invites.length})
+              </h3>
+              <span className="text-xs text-slate-500">Pre-autorizaciones para acceso con Google</span>
+            </div>
+            {invites.length === 0 ? (
+              <p className="p-6 text-center text-xs text-slate-500">
+                No hay invitaciones registradas. Utilice «Invitar Usuario» para preparar el perfil de un colaborador.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
+                      <th className="py-2.5 px-4">Usuario</th>
+                      <th className="py-2.5 px-4">Nombre y Correo Google</th>
+                      <th className="py-2.5 px-4">Rol Asignado</th>
+                      <th className="py-2.5 px-4">Estado</th>
+                      <th className="py-2.5 px-4 text-right">Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {invites.map((inv) => (
+                      <tr key={inv.id} className="hover:bg-slate-50/70">
+                        <td className="py-2.5 px-4 font-mono text-xs font-semibold text-slate-900">{inv.username}</td>
+                        <td className="py-2.5 px-4">
+                          <div className="font-medium text-slate-900">{inv.full_name}</div>
+                          <div className="text-xs text-slate-500">{inv.email}</div>
+                        </td>
+                        <td className="py-2.5 px-4 text-slate-700">{inv.role_name}</td>
+                        <td className="py-2.5 px-4 text-xs">
+                          <span className={inv.active ? 'text-emerald-700 font-semibold' : 'text-slate-500 font-semibold'}>
+                            {inv.active ? 'Habilitado' : 'Inactivo'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() => setDeleteInviteTarget(inv)}
+                            className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-500 hover:bg-red-50 hover:text-red-700"
+                            title="Eliminar invitación"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1049,7 +1099,9 @@ export const AdminPage: React.FC = () => {
                 <tbody className="divide-y divide-slate-100">
                   {auditLogs.map((l) => (
                     <tr key={l.id} className="hover:bg-slate-50/70">
-                      <td className="py-2.5 px-4 font-mono text-slate-500 whitespace-nowrap">{l.created_at}</td>
+                      <td className="py-2.5 px-4 font-mono text-slate-500 whitespace-nowrap">
+                        {l.created_at ? formatDisplayDate(l.created_at, settings.date_format) : '—'}
+                      </td>
                       <td className="py-2.5 px-4 font-semibold text-slate-900">{l.username}</td>
                       <td className="py-2.5 px-4 text-slate-600">{l.module}</td>
                       <td className="py-2.5 px-4 font-mono font-semibold text-slate-800">{l.action}</td>
@@ -1063,13 +1115,13 @@ export const AdminPage: React.FC = () => {
         </div>
       )}
 
-      {/* User Modal */}
+      {/* User / Invite Modal */}
       {userModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 overflow-y-auto">
           <div className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white shadow-xl my-8">
             <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
               <h3 className="text-base font-semibold text-slate-900">
-                {editingUser ? `Editar Usuario: ${editingUser.username}` : 'Crear Nuevo Usuario'}
+                {editingUser ? `Editar Usuario: ${editingUser.username}` : 'Invitar Colaborador (Google)'}
               </h3>
               <button
                 type="button"
@@ -1090,6 +1142,7 @@ export const AdminPage: React.FC = () => {
                     disabled={!!editingUser}
                     value={uUsername}
                     onChange={(e) => setUUsername(e.target.value)}
+                    placeholder="ej: coord_central"
                     className="w-full min-h-[40px] rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100"
                   />
                 </div>
@@ -1100,46 +1153,36 @@ export const AdminPage: React.FC = () => {
                     required
                     value={uFullName}
                     onChange={(e) => setUFullName(e.target.value)}
+                    placeholder="Nombre y Apellido"
                     className="w-full min-h-[40px] rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Correo Electrónico</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Correo de Google *</label>
                   <input
                     type="email"
+                    required
                     value={uEmail}
                     onChange={(e) => setUEmail(e.target.value)}
-                    className="w-full min-h-[40px] rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    {editingUser ? 'Nueva Contraseña (dejar vacío para mantener)' : 'Contraseña *'}
-                  </label>
-                  <input
-                    type="password"
-                    required={!editingUser}
-                    minLength={6}
-                    value={uPassword}
-                    onChange={(e) => setUPassword(e.target.value)}
+                    placeholder="colaborador@gmail.com"
                     className="w-full min-h-[40px] rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Rol Asignado *</label>
                   <select
-                    value={uRoleId}
-                    onChange={(e) => setURoleId(e.target.value)}
+                    value={uRoleSlug}
+                    onChange={(e) => setURoleSlug(e.target.value as RoleSlug)}
                     className="w-full min-h-[40px] rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white"
                   >
-                    {roles.map((r) => (
-                      <option key={r.id} value={r.id}>
+                    {ROLES.map((r) => (
+                      <option key={r.slug} value={r.slug}>
                         {r.name}
                       </option>
                     ))}
                   </select>
                 </div>
-                <div className="flex items-end pb-2">
+                <div className="sm:col-span-2 flex items-center pt-1">
                   <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
                     <input
                       type="checkbox"
@@ -1147,7 +1190,7 @@ export const AdminPage: React.FC = () => {
                       onChange={(e) => setUActive(e.target.checked)}
                       className="h-4 w-4 rounded border-slate-300"
                     />
-                    <span>Usuario habilitado para ingresar</span>
+                    <span>Usuario habilitado para ingresar al sistema</span>
                   </label>
                 </div>
               </div>
@@ -1158,14 +1201,12 @@ export const AdminPage: React.FC = () => {
                   Permisos Individuales por Módulo (Sobrescriben el rol base si se modifican)
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-52 overflow-y-auto border border-slate-200 rounded-lg p-3 bg-slate-50">
-                  {permissions.map((p) => {
-                    const roleHas = rolePerms.some(
-                      (rp) => rp.role_id === Number(uRoleId) && rp.permission_id === p.id
-                    );
+                  {ALL_PERMISSIONS.map((p) => {
+                    const roleHas = (DEFAULT_ROLE_PERMISSION_KEYS[uRoleSlug] || []).includes(p.key);
                     const effective =
                       uCustomPerms[p.key] !== undefined ? uCustomPerms[p.key] : roleHas;
                     return (
-                      <label key={p.id} className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                      <label key={p.key} className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={effective}
@@ -1194,7 +1235,7 @@ export const AdminPage: React.FC = () => {
                   style={{ backgroundColor: settings.primary_color }}
                   className="rounded-lg px-5 py-2 text-sm font-semibold text-white"
                 >
-                  Guardar Usuario
+                  {editingUser ? 'Guardar Cambios' : 'Guardar Invitación'}
                 </button>
               </div>
             </form>
@@ -1208,9 +1249,9 @@ export const AdminPage: React.FC = () => {
         message={`¿Está seguro de eliminar al usuario "${deleteUserTarget?.username}"?`}
         confirmLabel="Eliminar Usuario"
         onConfirm={async () => {
-          if (!deleteUserTarget) return;
+          if (!deleteUserTarget || !user) return;
           try {
-            await apiFetch(`/api/admin/users/${deleteUserTarget.id}`, { method: 'DELETE' });
+            await deleteAdminUser(user, deleteUserTarget.uid, deleteUserTarget.username);
             notify('Usuario eliminado.');
             setDeleteUserTarget(null);
             await loadUsersAndRoles();
@@ -1220,6 +1261,26 @@ export const AdminPage: React.FC = () => {
           }
         }}
         onCancel={() => setDeleteUserTarget(null)}
+      />
+
+      <ConfirmModal
+        open={!!deleteInviteTarget}
+        title="Eliminar Invitación"
+        message={`¿Está seguro de eliminar la invitación de "${deleteInviteTarget?.email}"?`}
+        confirmLabel="Eliminar Invitación"
+        onConfirm={async () => {
+          if (!deleteInviteTarget || !user) return;
+          try {
+            await deleteUserInvite(user, deleteInviteTarget.id, deleteInviteTarget.email);
+            notify('Invitación eliminada.');
+            setDeleteInviteTarget(null);
+            await loadUsersAndRoles();
+          } catch (err: unknown) {
+            notify(err instanceof Error ? err.message : 'Error al eliminar invitación.', 'error');
+            setDeleteInviteTarget(null);
+          }
+        }}
+        onCancel={() => setDeleteInviteTarget(null)}
       />
     </div>
   );

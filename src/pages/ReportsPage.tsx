@@ -2,8 +2,15 @@ import { BookmarkPlus, Eye, FileSpreadsheet, FileText, Trash2 } from 'lucide-rea
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useApp } from '../context/AppContext';
-import { apiFetch, formatDisplayDate, formatNumber } from '../lib/api';
+import { formatDisplayDate, formatNumber } from '../lib/api';
 import { exportTableToExcel, exportTableToPDF } from '../lib/export';
+import {
+  createSavedReport,
+  deleteSavedReport,
+  generateReportPreview,
+  listSavedReports,
+} from '../lib/firestoreService';
+import { SavedReport } from '../types';
 
 type ReportType =
   | 'coordinators'
@@ -95,17 +102,9 @@ const COLUMNS_BY_TYPE: Record<ReportType, { key: string; label: string }[]> = {
   ],
 };
 
-interface SavedReport {
-  id: number;
-  title: string;
-  report_type: ReportType;
-  filters_json: string;
-  columns_json: string;
-  generated_by: string;
-}
-
 export const ReportsPage: React.FC = () => {
-  const { departments, districts, settings, hasPermission, notify } = useApp();
+  const { user, departments, districts, territorialMaps, settings, hasPermission, notify } = useApp();
+  const canViewSensitive = hasPermission('sensitive_data:view');
 
   const [reportType, setReportType] = useState<ReportType>('coordinators');
   const [departmentId, setDepartmentId] = useState('');
@@ -132,34 +131,31 @@ export const ReportsPage: React.FC = () => {
 
   const availableColumns = COLUMNS_BY_TYPE[reportType];
   const filterDistricts = useMemo(
-    () => (departmentId ? districts.filter((d) => d.department_id === Number(departmentId)) : districts),
+    () => (departmentId ? districts.filter((d) => d.department_id === departmentId) : districts),
     [districts, departmentId]
   );
 
   const loadSaved = useCallback(async () => {
+    if (!user) return;
     try {
-      const list = await apiFetch<SavedReport[]>('/api/reports/saved');
+      const list = await listSavedReports(user);
       setSavedReports(list);
     } catch {
       // ignore
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     loadSaved();
   }, [loadSaved]);
 
   const runPreview = useCallback(async () => {
+    if (!user) return;
     setLoading(true);
     try {
-      const res = await apiFetch<{
-        rows: Record<string, unknown>[];
-        subtotals: { label: string; count: number }[];
-        totalCount: number;
-        totalVotes: number | null;
-      }>('/api/reports/preview', {
-        method: 'POST',
-        body: JSON.stringify({
+      const res = await generateReportPreview(
+        user,
+        {
           reportType,
           department_id: departmentId || null,
           district_id: districtId || null,
@@ -168,15 +164,30 @@ export const ReportsPage: React.FC = () => {
           sort_by: onpSortBy,
           date_from: dateFrom || null,
           date_to: dateTo || null,
-        }),
-      });
+        },
+        territorialMaps,
+        canViewSensitive
+      );
       setPreviewData(res);
     } catch (err: unknown) {
       notify(err instanceof Error ? err.message : 'Error al generar vista preliminar.', 'error');
     } finally {
       setLoading(false);
     }
-  }, [reportType, departmentId, districtId, seccionalNumber, onpOrganization, onpSortBy, dateFrom, dateTo, notify]);
+  }, [
+    user,
+    reportType,
+    departmentId,
+    districtId,
+    seccionalNumber,
+    onpOrganization,
+    onpSortBy,
+    dateFrom,
+    dateTo,
+    territorialMaps,
+    canViewSensitive,
+    notify,
+  ]);
 
   useEffect(() => {
     runPreview();
@@ -246,15 +257,12 @@ export const ReportsPage: React.FC = () => {
   };
 
   const handleSavePreset = async () => {
-    if (!presetTitle.trim()) return;
-    await apiFetch('/api/reports/saved', {
-      method: 'POST',
-      body: JSON.stringify({
-        title: presetTitle.trim(),
-        report_type: reportType,
-        filters: { departmentId, districtId, seccionalNumber, dateFrom, dateTo },
-        columns: selectedCols,
-      }),
+    if (!presetTitle.trim() || !user) return;
+    await createSavedReport(user, {
+      title: presetTitle.trim(),
+      report_type: reportType,
+      filters: { departmentId, districtId, seccionalNumber, dateFrom, dateTo },
+      columns: selectedCols,
     });
     setPresetTitle('');
     await loadSaved();
@@ -484,14 +492,14 @@ export const ReportsPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => {
-                        const f = JSON.parse(sr.filters_json || '{}');
+                        const f = sr.filters || {};
                         setReportType(sr.report_type);
                         setDepartmentId(f.departmentId || '');
                         setDistrictId(f.districtId || '');
                         setSeccionalNumber(f.seccionalNumber || '');
                         setDateFrom(f.dateFrom || '');
                         setDateTo(f.dateTo || '');
-                        setSelectedCols(JSON.parse(sr.columns_json || '[]'));
+                        setSelectedCols(sr.columns || []);
                       }}
                       className="text-left font-medium text-slate-700 hover:underline truncate"
                     >
@@ -500,7 +508,7 @@ export const ReportsPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={async () => {
-                        await apiFetch(`/api/reports/saved/${sr.id}`, { method: 'DELETE' });
+                        await deleteSavedReport(sr.id);
                         loadSaved();
                       }}
                       className="text-slate-400 hover:text-red-700"

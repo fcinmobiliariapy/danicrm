@@ -14,8 +14,14 @@ import {
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { useApp } from '../context/AppContext';
-import { apiFetch, formatDisplayDate } from '../lib/api';
+import { formatDisplayDate } from '../lib/api';
 import { exportAgendaPDF, exportSingleEventPDF } from '../lib/export';
+import {
+  deleteAgendaEvent,
+  listAgendaEvents,
+  saveAgendaEvent,
+  saveAgendaFollowUp,
+} from '../lib/firestoreService';
 import { AgendaEvent } from '../types';
 
 const EVENT_TYPES = [
@@ -35,7 +41,7 @@ const MONTHS_ES = [
 ];
 
 export const AgendaPage: React.FC = () => {
-  const { departments, districts, settings, hasPermission, notify } = useApp();
+  const { user, departments, districts, territorialMaps, settings, hasPermission, notify } = useApp();
 
   const [events, setEvents] = useState<AgendaEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,24 +82,29 @@ export const AgendaPage: React.FC = () => {
   const [actStatus, setActStatus] = useState<'programado' | 'realizado' | 'cancelado'>('realizado');
 
   const formDistricts = useMemo(
-    () => (departmentId ? districts.filter((d) => d.department_id === Number(departmentId)) : []),
+    () => (departmentId ? districts.filter((d) => d.department_id === departmentId) : []),
     [districts, departmentId]
   );
 
   const loadEvents = useCallback(async () => {
+    if (!user) return;
     setLoading(true);
     try {
-      const qs = new URLSearchParams();
-      if (search.trim()) qs.set('search', search.trim());
-      if (filterType) qs.set('event_type', filterType);
-      const res = await apiFetch<AgendaEvent[]>(`/api/agenda?${qs.toString()}`);
+      const res = await listAgendaEvents(
+        user,
+        {
+          search: search.trim() || undefined,
+          event_type: filterType || undefined,
+        },
+        territorialMaps
+      );
       setEvents(res);
     } catch (err: unknown) {
       notify(err instanceof Error ? err.message : 'Error al cargar agenda.', 'error');
     } finally {
       setLoading(false);
     }
-  }, [search, filterType, notify]);
+  }, [user, search, filterType, territorialMaps, notify]);
 
   useEffect(() => {
     loadEvents();
@@ -197,31 +208,30 @@ export const AgendaPage: React.FC = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     try {
-      const payload = {
-        title,
-        event_type: eventType,
-        event_date: eventDate,
-        start_time: startTime,
-        end_time: endTime,
-        department_id: departmentId ? Number(departmentId) : null,
-        district_id: districtId ? Number(districtId) : null,
-        seccional_number: seccionalNumber ? Number(seccionalNumber) : null,
-        location,
-        responsible,
-        participants,
-        description,
-        notes,
-        reminder_minutes: Number(reminderMinutes || 60),
-        status,
-      };
-      if (editing) {
-        await apiFetch(`/api/agenda/${editing.id}`, { method: 'PUT', body: JSON.stringify(payload) });
-        notify('Actividad actualizada.');
-      } else {
-        await apiFetch('/api/agenda', { method: 'POST', body: JSON.stringify(payload) });
-        notify('Actividad programada en la agenda.');
-      }
+      await saveAgendaEvent(
+        user,
+        {
+          title,
+          event_type: eventType,
+          event_date: eventDate,
+          start_time: startTime,
+          end_time: endTime,
+          department_id: departmentId || null,
+          district_id: districtId || null,
+          seccional_number: seccionalNumber ? Number(seccionalNumber) : null,
+          location,
+          responsible,
+          participants,
+          description,
+          notes,
+          reminder_minutes: Number(reminderMinutes || 60),
+          status,
+        },
+        editing?.id
+      );
+      notify(editing ? 'Actividad actualizada.' : 'Actividad programada en la agenda.');
       setModalOpen(false);
       await loadEvents();
     } catch (err: unknown) {
@@ -231,16 +241,13 @@ export const AgendaPage: React.FC = () => {
 
   const handleSaveFollowUp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!followUpEvent) return;
+    if (!followUpEvent || !user) return;
     try {
-      await apiFetch(`/api/agenda/${followUpEvent.id}/activity`, {
-        method: 'POST',
-        body: JSON.stringify({
-          summary: actSummary,
-          attendance_count: Number(actAttendance || 0),
-          outcomes: actOutcomes,
-          status: actStatus,
-        }),
+      await saveAgendaFollowUp(user, followUpEvent.id, {
+        summary: actSummary,
+        attendance_count: Number(actAttendance || 0),
+        outcomes: actOutcomes,
+        status: actStatus,
       });
       notify('Seguimiento de actividad guardado.');
       setFollowUpEvent(null);
@@ -251,9 +258,9 @@ export const AgendaPage: React.FC = () => {
   };
 
   const handleDelete = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || !user) return;
     try {
-      await apiFetch(`/api/agenda/${deleteTarget.id}`, { method: 'DELETE' });
+      await deleteAgendaEvent(user, deleteTarget.id, deleteTarget.title);
       notify('Evento eliminado de la agenda.');
       setDeleteTarget(null);
       await loadEvents();

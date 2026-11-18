@@ -1,30 +1,24 @@
-import { Eye, EyeOff, Lock, ShieldCheck, User as UserIcon } from 'lucide-react';
+import { Database, ShieldCheck } from 'lucide-react';
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 
-const DEMO_ACCOUNTS = [
-  { label: 'Admin Principal', user: 'admin', pass: 'Dani2018!' },
-  { label: 'Administrador', user: 'operador', pass: 'Admin2018!' },
-  { label: 'Coordinador', user: 'coordinador', pass: 'Coord2018!' },
-  { label: 'Consulta', user: 'consulta', pass: 'Consulta2018!' },
-];
-
 export const LoginPage: React.FC = () => {
-  const { login, settings } = useApp();
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('Dani2018!');
-  const [showPass, setShowPass] = useState(false);
+  const { loginWithGoogle, settings } = useApp();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleGoogleSignIn = async () => {
     setError('');
     setSubmitting(true);
     try {
-      await login(username, password);
+      await loginWithGoogle();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'No se pudo iniciar sesión.');
+      const msg = err instanceof Error ? err.message : 'No se pudo iniciar sesión con Google.';
+      if (msg.includes('popup-closed-by-user')) {
+        setError('Se cerró la ventana de acceso antes de completar el inicio de sesión.');
+      } else {
+        setError(msg);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -59,9 +53,7 @@ export const LoginPage: React.FC = () => {
           <h1 className="text-4xl font-bold tracking-tight text-white leading-tight [text-wrap:balance]">
             {settings.platform_name}
           </h1>
-          <p className="mt-4 text-base text-slate-200 leading-relaxed">
-            {settings.institutional_text}
-          </p>
+          <p className="mt-4 text-base text-slate-200 leading-relaxed">{settings.institutional_text}</p>
           <div className="mt-8 flex flex-wrap items-center gap-6 text-xs text-slate-300 border-t border-white/15 pt-5">
             <span>18 Departamentos de Paraguay</span>
             <span aria-hidden="true">·</span>
@@ -94,77 +86,38 @@ export const LoginPage: React.FC = () => {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1.5">Usuario</label>
-              <div className="relative">
-                <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                <input
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  required
-                  autoComplete="username"
-                  placeholder="Ingrese su usuario"
-                  className="w-full min-h-[44px] rounded-lg border border-slate-300 bg-white pl-10 pr-3 py-2 text-sm text-slate-900 focus:border-slate-900 focus:outline-none"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1.5">Contraseña</label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                <input
-                  type={showPass ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  autoComplete="current-password"
-                  placeholder="Ingrese su contraseña"
-                  className="w-full min-h-[44px] rounded-lg border border-slate-300 bg-white pl-10 pr-10 py-2 text-sm text-slate-900 focus:border-slate-900 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPass((v) => !v)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 flex items-center justify-center text-slate-400 hover:text-slate-700"
-                  aria-label="Mostrar u ocultar contraseña"
-                >
-                  {showPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 leading-relaxed">
+              Ingrese con su cuenta institucional de Google para acceder a la base de datos territorial en tiempo real.
+            </p>
 
             <button
-              type="submit"
+              type="button"
+              onClick={handleGoogleSignIn}
               disabled={submitting}
               style={{ backgroundColor: settings.primary_color }}
-              className="w-full min-h-[44px] rounded-lg py-2.5 px-4 text-sm font-semibold text-white hover:opacity-95 transition-opacity disabled:opacity-60"
+              className="w-full min-h-[46px] inline-flex items-center justify-center gap-2.5 rounded-lg py-2.5 px-4 text-sm font-semibold text-white hover:opacity-95 transition-opacity disabled:opacity-60"
             >
-              {submitting ? 'Verificando acceso...' : 'Iniciar Sesión'}
+              <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M21.35 11.1h-9.17v2.73h6.51c-.33 3.81-3.5 5.44-6.5 5.44C8.36 19.27 5 16.25 5 12c0-4.1 3.2-7.27 7.2-7.27 3.09 0 4.9 1.97 4.9 1.97L19 4.72S16.56 2 12.1 2C6.42 2 2.03 6.8 2.03 12c0 5.05 4.13 10 10.22 10 5.35 0 9.25-3.67 9.25-9.09 0-1.15-.15-1.81-.15-1.81z"
+                />
+              </svg>
+              <span>{submitting ? 'Conectando con Google...' : 'Ingresar con Google'}</span>
             </button>
-          </form>
+          </div>
 
-          <div className="mt-6 pt-5 border-t border-slate-200">
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-2.5">
-              <ShieldCheck className="h-4 w-4 text-slate-500" />
-              <span>Accesos de prueba por rol</span>
+          <div className="mt-6 pt-5 border-t border-slate-200 space-y-2.5 text-xs text-slate-600">
+            <div className="flex items-start gap-2">
+              <Database className="h-4 w-4 text-slate-500 shrink-0 mt-0.5" />
+              <span>Persistencia sincronizada en la nube con Firebase Firestore y control por roles.</span>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              {DEMO_ACCOUNTS.map((acc) => (
-                <button
-                  key={acc.user}
-                  type="button"
-                  onClick={() => {
-                    setUsername(acc.user);
-                    setPassword(acc.pass);
-                  }}
-                  className="text-left rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 hover:bg-slate-100 transition-colors"
-                >
-                  <div className="text-xs font-semibold text-slate-800">{acc.label}</div>
-                  <div className="text-[11px] font-mono text-slate-500">{acc.user}</div>
-                </button>
-              ))}
+            <div className="flex items-start gap-2">
+              <ShieldCheck className="h-4 w-4 text-slate-500 shrink-0 mt-0.5" />
+              <span>
+                Los usuarios nuevos quedan pendientes de aprobación hasta que el administrador habilite su rol territorial.
+              </span>
             </div>
           </div>
         </div>

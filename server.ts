@@ -1,23 +1,13 @@
-import cookieParser from 'cookie-parser';
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { initSchema } from './src/server/db.ts';
-import { registerApiRoutes } from './src/server/routes.ts';
-import { seedDatabase } from './src/server/seed.ts';
 
 async function startServer() {
-  initSchema();
-  seedDatabase();
-
   const app = express();
   const PORT = Number(process.env.PORT || 3000);
 
   app.use(express.json({ limit: '12mb' }));
-  app.use(cookieParser());
-
-  registerApiRoutes(app);
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

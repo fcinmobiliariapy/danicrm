@@ -1,5 +1,16 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { apiFetch, setAuthToken } from '../lib/api';
+import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { auth, googleProvider } from '../firebase';
+import { seedFirestoreIfNeeded } from '../lib/firestoreSeed';
+import {
+  ensureUserProfile,
+  getPublicBranding,
+  getSystemSettings,
+  getTerritorialTree,
+  isBootstrappedAdminEmail,
+  listCustomFields,
+  TerritorialMaps,
+} from '../lib/firestoreService';
 import { CustomField, Department, District, Seccional, SystemSettings, User } from '../types';
 
 interface ToastMessage {
@@ -15,8 +26,9 @@ interface AppContextValue {
   departments: Department[];
   districts: District[];
   seccionales: Seccional[];
+  territorialMaps: TerritorialMaps;
   customFields: CustomField[];
-  login: (username: string, password: string) => Promise<void>;
+  loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   refreshTerritorial: () => Promise<void>;
   refreshSettings: () => Promise<void>;
@@ -27,7 +39,7 @@ interface AppContextValue {
 }
 
 const DEFAULT_SETTINGS: SystemSettings = {
-  id: 1,
+  id: 'main',
   platform_name: 'CRM Político – Gestión Territorial',
   organization_name: 'Comando Territorial Dani Centurión 2018',
   campaign_reference: 'DANI CENTURIÓN 2018',
@@ -44,14 +56,15 @@ const DEFAULT_SETTINGS: SystemSettings = {
   border_radius: 'rounded',
   header_text: 'CRM POLÍTICO – GESTIÓN TERRITORIAL | DANI CENTURIÓN 2018',
   footer_text: 'Documento de uso interno y confidencial · Estructura Territorial Paraguay',
-  institutional_text: 'Plataforma centralizada de organización territorial, coordinación electoral, agenda política y proyección estadística.',
+  institutional_text:
+    'Plataforma centralizada de organización territorial, coordinación electoral, agenda política y proyección estadística.',
   contact_phone: '+595 21 440 2018',
   contact_email: 'coordinacion@danicenturion2018.org.py',
   contact_address: 'Asunción, República del Paraguay',
   document_format: 'A4',
   date_format: 'DD/MM/YYYY',
-  report_show_charts: 1,
-  report_show_totals: 1,
+  report_show_charts: true,
+  report_show_totals: true,
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -71,7 +84,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setToasts((prev) => [...prev, { id, type, text }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
+    }, 4500);
   }, []);
 
   const applyThemeColors = useCallback((s: SystemSettings) => {
@@ -99,99 +112,119 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     document.title = s.platform_name || 'CRM Político – Gestión Territorial';
   }, []);
 
+  const territorialMaps = useMemo<TerritorialMaps>(
+    () => ({
+      deptMap: Object.fromEntries(departments.map((d) => [d.id, d.name])),
+      distMap: Object.fromEntries(districts.map((d) => [d.id, d.name])),
+    }),
+    [departments, districts]
+  );
+
   const refreshTerritorial = useCallback(async () => {
-    try {
-      const data = await apiFetch<{
-        departments: Department[];
-        districts: District[];
-        seccionales: Seccional[];
-      }>('/api/territorial/tree');
-      setDepartments(data.departments);
-      setDistricts(data.districts);
-      setSeccionales(data.seccionales);
-    } catch {
-      // ignore if unauthenticated
-    }
-  }, []);
+    if (!user || !user.active) return;
+    const data = await getTerritorialTree(user);
+    setDepartments(data.departments);
+    setDistricts(data.districts);
+    setSeccionales(data.seccionales);
+  }, [user]);
 
   const refreshSettings = useCallback(async () => {
-    try {
-      const s = await apiFetch<SystemSettings>('/api/settings');
-      if (s) {
-        setSettings(s);
-        applyThemeColors(s);
-      }
-    } catch {
-      // ignore
-    }
-  }, [applyThemeColors]);
+    if (!user || !user.active) return;
+    const s = await getSystemSettings();
+    setSettings(s);
+    applyThemeColors(s);
+  }, [user, applyThemeColors]);
 
   const refreshCustomFields = useCallback(async () => {
-    try {
-      const cf = await apiFetch<CustomField[]>('/api/custom-fields');
-      setCustomFields(cf);
-    } catch {
-      // ignore
-    }
-  }, []);
+    if (!user || !user.active) return;
+    const cf = await listCustomFields(user, true);
+    setCustomFields(cf);
+  }, [user]);
 
-  const bootstrapAuthenticated = useCallback(async () => {
-    await Promise.all([refreshSettings(), refreshTerritorial(), refreshCustomFields()]);
-  }, [refreshSettings, refreshTerritorial, refreshCustomFields]);
+  const bootstrapAuthenticated = useCallback(
+    async (activeUser: User) => {
+      if (isBootstrappedAdminEmail(activeUser.email)) {
+        await seedFirestoreIfNeeded(activeUser);
+      }
+      const [s, tree, cf] = await Promise.all([
+        getSystemSettings(),
+        getTerritorialTree(activeUser),
+        listCustomFields(activeUser, true),
+      ]);
+      setSettings(s);
+      applyThemeColors(s);
+      setDepartments(tree.departments);
+      setDistricts(tree.districts);
+      setSeccionales(tree.seccionales);
+      setCustomFields(cf);
+    },
+    [applyThemeColors]
+  );
 
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
-        const pub = await apiFetch<SystemSettings>('/api/public/branding');
+        const pub = await getPublicBranding();
         if (mounted && pub?.platform_name) {
           setSettings(pub);
           applyThemeColors(pub);
         }
       } catch {
-        // ignore
+        // ignore unauthenticated branding fallback
       }
+    })();
+
+    const unsub = onAuthStateChanged(auth, async (fbUser) => {
+      if (!mounted) return;
+      if (!fbUser) {
+        setUser(null);
+        setDepartments([]);
+        setDistricts([]);
+        setSeccionales([]);
+        setCustomFields([]);
+        setLoadingAuth(false);
+        return;
+      }
+
+      setLoadingAuth(true);
       try {
-        const me = await apiFetch<{ user: User }>('/api/auth/me');
-        if (mounted && me?.user) {
-          setUser(me.user);
-          await bootstrapAuthenticated();
+        const profile = await ensureUserProfile(fbUser);
+        if (!mounted) return;
+        setUser(profile);
+        if (profile.active) {
+          await bootstrapAuthenticated(profile);
         }
-      } catch {
-        if (mounted) setUser(null);
+      } catch (err) {
+        console.error('Error al inicializar sesión de Firebase:', err);
+        if (mounted) {
+          notify(err instanceof Error ? err.message : 'Error al verificar sesión con Firestore.', 'error');
+        }
       } finally {
         if (mounted) setLoadingAuth(false);
       }
-    })();
+    });
+
     return () => {
       mounted = false;
+      unsub();
     };
-  }, [applyThemeColors, bootstrapAuthenticated]);
+  }, [applyThemeColors, bootstrapAuthenticated, notify]);
 
-  const login = async (username: string, password: string) => {
-    const res = await apiFetch<{ token: string; user: User }>('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ username, password }),
-    });
-    setAuthToken(res.token);
-    setUser(res.user);
-    await bootstrapAuthenticated();
-    notify(`Bienvenido, ${res.user.full_name}`, 'success');
+  const loginWithGoogle = async () => {
+    const cred = await signInWithPopup(auth, googleProvider);
+    const displayName = cred.user.displayName || cred.user.email || 'Usuario';
+    notify(`Sesión iniciada como ${displayName}`, 'success');
   };
 
   const logout = async () => {
-    try {
-      await apiFetch('/api/auth/logout', { method: 'POST' });
-    } catch {
-      // ignore
-    }
-    setAuthToken(null);
+    await signOut(auth);
     setUser(null);
   };
 
   const hasPermission = useCallback(
     (key: string) => {
-      if (!user) return false;
+      if (!user || !user.active) return false;
       if (user.role_slug === 'super_admin') return true;
       return !!user.permissions?.[key];
     },
@@ -207,8 +240,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         departments,
         districts,
         seccionales,
+        territorialMaps,
         customFields,
-        login,
+        loginWithGoogle,
         logout,
         refreshTerritorial,
         refreshSettings,

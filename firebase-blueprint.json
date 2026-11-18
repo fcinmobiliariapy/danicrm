@@ -1,0 +1,361 @@
+{
+  "entities": {
+    "PublicBranding": {
+      "title": "PublicBranding",
+      "description": "Configuración pública de marca e identidad visual para la pantalla de acceso (sin PII).",
+      "type": "object",
+      "properties": {
+        "platform_name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "organization_name": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "campaign_reference": { "type": "string", "maxLength": 80 },
+        "logo_url": { "type": "string", "maxLength": 500000 },
+        "institutional_image_url": { "type": "string", "maxLength": 500000 },
+        "primary_color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "maxLength": 7 },
+        "secondary_color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "maxLength": 7 },
+        "theme_mode": { "type": "string", "enum": ["light", "dark", "custom"], "maxLength": 16 },
+        "background_color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "maxLength": 7 },
+        "surface_color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "maxLength": 7 },
+        "text_color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "maxLength": 7 },
+        "font_family": { "type": "string", "maxLength": 60 },
+        "font_size_scale": { "type": "string", "enum": ["compact", "normal", "large"], "maxLength": 16 },
+        "border_radius": { "type": "string", "enum": ["sharp", "rounded", "soft"], "maxLength": 16 },
+        "institutional_text": { "type": "string", "maxLength": 600 },
+        "ownerUid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["platform_name", "organization_name", "primary_color", "secondary_color", "ownerUid", "updatedAt"]
+    },
+    "SystemSettings": {
+      "title": "SystemSettings",
+      "description": "Configuración institucional completa del sistema, apariencia y reportes.",
+      "type": "object",
+      "properties": {
+        "platform_name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "organization_name": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "campaign_reference": { "type": "string", "maxLength": 80 },
+        "logo_url": { "type": "string", "maxLength": 500000 },
+        "institutional_image_url": { "type": "string", "maxLength": 500000 },
+        "primary_color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "maxLength": 7 },
+        "secondary_color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "maxLength": 7 },
+        "theme_mode": { "type": "string", "enum": ["light", "dark", "custom"], "maxLength": 16 },
+        "background_color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "maxLength": 7 },
+        "surface_color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "maxLength": 7 },
+        "text_color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "maxLength": 7 },
+        "font_family": { "type": "string", "maxLength": 60 },
+        "font_size_scale": { "type": "string", "enum": ["compact", "normal", "large"], "maxLength": 16 },
+        "border_radius": { "type": "string", "enum": ["sharp", "rounded", "soft"], "maxLength": 16 },
+        "header_text": { "type": "string", "maxLength": 200 },
+        "footer_text": { "type": "string", "maxLength": 240 },
+        "institutional_text": { "type": "string", "maxLength": 600 },
+        "contact_phone": { "type": "string", "maxLength": 40 },
+        "contact_email": { "type": "string", "maxLength": 120 },
+        "contact_address": { "type": "string", "maxLength": 180 },
+        "document_format": { "type": "string", "enum": ["A4", "LETTER"], "maxLength": 10 },
+        "date_format": { "type": "string", "enum": ["DD/MM/YYYY", "YYYY-MM-DD"], "maxLength": 16 },
+        "report_show_charts": { "type": "boolean" },
+        "report_show_totals": { "type": "boolean" },
+        "ownerUid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["platform_name", "organization_name", "primary_color", "secondary_color", "document_format", "date_format", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Perfil de usuario autenticado, rol asignado y permisos individuales.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "username": { "type": "string", "minLength": 2, "maxLength": 60 },
+        "full_name": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "email": { "type": "string", "format": "email", "maxLength": 160 },
+        "role_slug": { "type": "string", "enum": ["super_admin", "admin", "coordinator", "viewer"], "maxLength": 24 },
+        "role_name": { "type": "string", "maxLength": 60 },
+        "active": { "type": "boolean" },
+        "custom_permissions": { "type": "object" },
+        "last_login_at": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "username", "full_name", "email", "role_slug", "role_name", "active", "createdAt", "updatedAt"]
+    },
+    "UserInvite": {
+      "title": "UserInvite",
+      "description": "Invitación y pre-asignación de rol para colaboradores por correo electrónico.",
+      "type": "object",
+      "properties": {
+        "username": { "type": "string", "minLength": 2, "maxLength": 60 },
+        "full_name": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "email": { "type": "string", "format": "email", "maxLength": 160 },
+        "role_slug": { "type": "string", "enum": ["super_admin", "admin", "coordinator", "viewer"], "maxLength": 24 },
+        "role_name": { "type": "string", "maxLength": 60 },
+        "active": { "type": "boolean" },
+        "custom_permissions": { "type": "object" },
+        "ownerUid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["username", "full_name", "email", "role_slug", "role_name", "active", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "Department": {
+      "title": "Department",
+      "description": "Departamento territorial de Paraguay.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "minLength": 1, "maxLength": 10 },
+        "name": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "active": { "type": "boolean" },
+        "ownerUid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "name", "active", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "District": {
+      "title": "District",
+      "description": "Distrito perteneciente a un departamento.",
+      "type": "object",
+      "properties": {
+        "department_id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "name": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "active": { "type": "boolean" },
+        "ownerUid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["department_id", "name", "active", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "Seccional": {
+      "title": "Seccional",
+      "description": "Seccional electoral vinculada a departamento y distrito.",
+      "type": "object",
+      "properties": {
+        "department_id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "district_id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "number": { "type": "integer" },
+        "name": { "type": "string", "maxLength": 120 },
+        "active": { "type": "boolean" },
+        "ownerUid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["department_id", "district_id", "number", "active", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "PersonRecord": {
+      "title": "PersonRecord",
+      "description": "Integrante de estructura territorial (coordinadores, jóvenes o mujeres).",
+      "type": "object",
+      "properties": {
+        "first_name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "last_name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "ci": { "type": "string", "minLength": 4, "maxLength": 20 },
+        "department_id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "district_id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "seccional_number": { "type": "integer" },
+        "phone": { "type": "string", "minLength": 6, "maxLength": 30 },
+        "registered_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "maxLength": 10 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "consent_accepted": { "type": "boolean" },
+        "custom_fields": { "type": "object" },
+        "ownerUid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["first_name", "last_name", "ci", "department_id", "district_id", "seccional_number", "phone", "registered_at", "consent_accepted", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "OnpRecord": {
+      "title": "OnpRecord",
+      "description": "Referente de Organización No Política (ONP).",
+      "type": "object",
+      "properties": {
+        "full_name": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "phone": { "type": "string", "minLength": 6, "maxLength": 30 },
+        "organization": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "registered_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "maxLength": 10 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "custom_fields": { "type": "object" },
+        "ownerUid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["full_name", "phone", "organization", "registered_at", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "VoteProjection": {
+      "title": "VoteProjection",
+      "description": "Proyección de votos estimados vinculada a un coordinador.",
+      "type": "object",
+      "properties": {
+        "coordinator_id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "department_id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "district_id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "seccional_number": { "type": "integer" },
+        "estimated_votes": { "type": "integer" },
+        "responsible_name": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "custom_fields": { "type": "object" },
+        "ownerUid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["coordinator_id", "department_id", "district_id", "seccional_number", "estimated_votes", "responsible_name", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "AgendaEvent": {
+      "title": "AgendaEvent",
+      "description": "Evento de agenda política o territorial con seguimiento de acta.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 2, "maxLength": 180 },
+        "event_type": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "event_date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "maxLength": 10 },
+        "start_time": { "type": "string", "pattern": "^\\d{2}:\\d{2}$", "maxLength": 5 },
+        "end_time": { "type": "string", "pattern": "^\\d{2}:\\d{2}$", "maxLength": 5 },
+        "department_id": { "type": "string", "maxLength": 128 },
+        "district_id": { "type": "string", "maxLength": 128 },
+        "seccional_number": { "type": "integer" },
+        "location": { "type": "string", "maxLength": 200 },
+        "responsible": { "type": "string", "maxLength": 120 },
+        "participants": { "type": "string", "maxLength": 400 },
+        "description": { "type": "string", "maxLength": 1200 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "reminder_minutes": { "type": "integer" },
+        "status": { "type": "string", "enum": ["programado", "realizado", "cancelado"], "maxLength": 20 },
+        "activity_summary": { "type": "string", "maxLength": 1200 },
+        "attendance_count": { "type": "integer" },
+        "activity_outcomes": { "type": "string", "maxLength": 1200 },
+        "custom_fields": { "type": "object" },
+        "ownerUid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "event_type", "event_date", "start_time", "end_time", "reminder_minutes", "status", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "CustomField": {
+      "title": "CustomField",
+      "description": "Definición de campo personalizado para módulos del sistema.",
+      "type": "object",
+      "properties": {
+        "module": { "type": "string", "enum": ["coordinators", "youth", "women", "onp", "projections", "agenda"], "maxLength": 20 },
+        "field_key": { "type": "string", "pattern": "^[a-z0-9_]+$", "maxLength": 64 },
+        "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "field_type": { "type": "string", "enum": ["text", "number", "select", "date", "textarea"], "maxLength": 20 },
+        "required": { "type": "boolean" },
+        "active": { "type": "boolean" },
+        "sort_order": { "type": "integer" },
+        "options": { "type": "array" },
+        "ownerUid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["module", "field_key", "label", "field_type", "required", "active", "sort_order", "options", "ownerUid", "createdAt", "updatedAt"]
+    },
+    "SavedReport": {
+      "title": "SavedReport",
+      "description": "Configuración guardada de informe dinámico.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "report_type": { "type": "string", "maxLength": 40 },
+        "filters": { "type": "object" },
+        "columns": { "type": "array" },
+        "generated_by": { "type": "string", "maxLength": 80 },
+        "ownerUid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "report_type", "filters", "columns", "generated_by", "ownerUid", "createdAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Registro inmutable de auditoría de acciones en la plataforma.",
+      "type": "object",
+      "properties": {
+        "user_uid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "username": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "action": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "module": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "entity_id": { "type": "string", "maxLength": 128 },
+        "details": { "type": "string", "maxLength": 500 },
+        "ownerUid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["user_uid", "username", "action", "module", "ownerUid", "createdAt"]
+    },
+    "ConnectionTest": {
+      "title": "ConnectionTest",
+      "description": "Documento de verificación de conectividad inicial con Firestore.",
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean" }
+      }
+    }
+  },
+  "firestore": {
+    "/public_branding/{docId}": {
+      "schema": { "$ref": "#/entities/PublicBranding" },
+      "description": "Marca pública visible antes de iniciar sesión (solo get en main)."
+    },
+    "/system_settings/{docId}": {
+      "schema": { "$ref": "#/entities/SystemSettings" },
+      "description": "Configuración institucional completa del sistema."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Perfiles de usuario, roles y permisos (PII restringida)."
+    },
+    "/user_invites/{inviteId}": {
+      "schema": { "$ref": "#/entities/UserInvite" },
+      "description": "Invitaciones de equipo con rol pre-asignado."
+    },
+    "/departments/{departmentId}": {
+      "schema": { "$ref": "#/entities/Department" },
+      "description": "Departamentos territoriales de Paraguay."
+    },
+    "/districts/{districtId}": {
+      "schema": { "$ref": "#/entities/District" },
+      "description": "Distritos vinculados a departamentos."
+    },
+    "/seccionales/{seccionalId}": {
+      "schema": { "$ref": "#/entities/Seccional" },
+      "description": "Seccionales vinculadas a departamentos y distritos."
+    },
+    "/coordinators/{personId}": {
+      "schema": { "$ref": "#/entities/PersonRecord" },
+      "description": "Coordinadores territoriales."
+    },
+    "/youth_members/{personId}": {
+      "schema": { "$ref": "#/entities/PersonRecord" },
+      "description": "Estructura territorial de jóvenes."
+    },
+    "/women_members/{personId}": {
+      "schema": { "$ref": "#/entities/PersonRecord" },
+      "description": "Estructura territorial de mujeres."
+    },
+    "/onp_members/{onpId}": {
+      "schema": { "$ref": "#/entities/OnpRecord" },
+      "description": "Referentes de Organizaciones No Políticas (ONP)."
+    },
+    "/vote_projections/{projectionId}": {
+      "schema": { "$ref": "#/entities/VoteProjection" },
+      "description": "Proyecciones de votos vinculadas a coordinadores."
+    },
+    "/agenda_events/{eventId}": {
+      "schema": { "$ref": "#/entities/AgendaEvent" },
+      "description": "Eventos de agenda, calendario y actas de seguimiento."
+    },
+    "/custom_fields/{fieldId}": {
+      "schema": { "$ref": "#/entities/CustomField" },
+      "description": "Campos personalizados por módulo."
+    },
+    "/saved_reports/{reportId}": {
+      "schema": { "$ref": "#/entities/SavedReport" },
+      "description": "Configuraciones guardadas de reportes."
+    },
+    "/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Registro de auditoría inmutable."
+    },
+    "/test/{docId}": {
+      "schema": { "$ref": "#/entities/ConnectionTest" },
+      "description": "Verificación de conectividad al iniciar la aplicación."
+    }
+  }
+}

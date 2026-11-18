@@ -2,10 +2,20 @@ import { Edit3, Plus, Power, Trash2 } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { useApp } from '../context/AppContext';
-import { apiFetch } from '../lib/api';
+import {
+  deleteDepartment,
+  deleteDistrict,
+  deleteSeccional,
+  saveDepartment,
+  saveDistrict,
+  saveSeccional,
+  toggleDepartmentActive,
+  toggleDistrictActive,
+  toggleSeccionalActive,
+} from '../lib/firestoreService';
 
 export const TerritorialPage: React.FC = () => {
-  const { departments, districts, seccionales, settings, hasPermission, refreshTerritorial, notify } = useApp();
+  const { user, departments, districts, seccionales, settings, hasPermission, refreshTerritorial, notify } = useApp();
   const canManage = hasPermission('territorial:manage');
 
   const [tab, setTab] = useState<'departments' | 'districts' | 'seccionales'>('departments');
@@ -13,12 +23,12 @@ export const TerritorialPage: React.FC = () => {
   // Dept form
   const [deptCode, setDeptCode] = useState('');
   const [deptName, setDeptName] = useState('');
-  const [editDeptId, setEditDeptId] = useState<number | null>(null);
+  const [editDeptId, setEditDeptId] = useState<string | null>(null);
 
   // District form
   const [distDeptId, setDistDeptId] = useState('');
   const [distName, setDistName] = useState('');
-  const [editDistId, setEditDistId] = useState<number | null>(null);
+  const [editDistId, setEditDistId] = useState<string | null>(null);
   const [distFilterDept, setDistFilterDept] = useState('');
 
   // Seccional form
@@ -26,13 +36,13 @@ export const TerritorialPage: React.FC = () => {
   const [seccDistId, setSeccDistId] = useState('');
   const [seccNum, setSeccNum] = useState('');
   const [seccName, setSeccName] = useState('');
-  const [editSeccId, setEditSeccId] = useState<number | null>(null);
+  const [editSeccId, setEditSeccId] = useState<string | null>(null);
   const [seccFilterDept, setSeccFilterDept] = useState('');
 
-  const [deleteTarget, setDeleteTarget] = useState<{ type: 'departments' | 'districts' | 'seccionales'; id: number; label: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'departments' | 'districts' | 'seccionales'; id: string; label: string } | null>(null);
 
   const seccFormDistricts = useMemo(
-    () => (seccDeptId ? districts.filter((d) => d.department_id === Number(seccDeptId)) : []),
+    () => (seccDeptId ? districts.filter((d) => d.department_id === seccDeptId) : []),
     [districts, seccDeptId]
   );
 
@@ -41,20 +51,14 @@ export const TerritorialPage: React.FC = () => {
 
   const handleSaveDept = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     try {
-      if (editDeptId) {
-        await apiFetch(`/api/territorial/departments/${editDeptId}`, {
-          method: 'PUT',
-          body: JSON.stringify({ code: deptCode, name: deptName }),
-        });
-        notify('Departamento actualizado.');
-      } else {
-        await apiFetch('/api/territorial/departments', {
-          method: 'POST',
-          body: JSON.stringify({ code: deptCode || '18', name: deptName, active: true }),
-        });
-        notify('Departamento agregado.');
-      }
+      await saveDepartment(
+        user,
+        { code: deptCode || '18', name: deptName, active: true },
+        editDeptId || undefined
+      );
+      notify(editDeptId ? 'Departamento actualizado.' : 'Departamento agregado.');
       setDeptCode('');
       setDeptName('');
       setEditDeptId(null);
@@ -66,20 +70,14 @@ export const TerritorialPage: React.FC = () => {
 
   const handleSaveDistrict = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     try {
-      if (editDistId) {
-        await apiFetch(`/api/territorial/districts/${editDistId}`, {
-          method: 'PUT',
-          body: JSON.stringify({ department_id: Number(distDeptId), name: distName }),
-        });
-        notify('Distrito actualizado.');
-      } else {
-        await apiFetch('/api/territorial/districts', {
-          method: 'POST',
-          body: JSON.stringify({ department_id: Number(distDeptId), name: distName, active: true }),
-        });
-        notify('Distrito agregado.');
-      }
+      await saveDistrict(
+        user,
+        { department_id: distDeptId, name: distName, active: true },
+        editDistId || undefined
+      );
+      notify(editDistId ? 'Distrito actualizado.' : 'Distrito agregado.');
       setDistName('');
       setEditDistId(null);
       await refreshTerritorial();
@@ -90,21 +88,20 @@ export const TerritorialPage: React.FC = () => {
 
   const handleSaveSeccional = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     try {
-      const payload = {
-        department_id: Number(seccDeptId),
-        district_id: Number(seccDistId),
-        number: Number(seccNum),
-        name: seccName,
-        active: true,
-      };
-      if (editSeccId) {
-        await apiFetch(`/api/territorial/seccionales/${editSeccId}`, { method: 'PUT', body: JSON.stringify(payload) });
-        notify('Seccional actualizada.');
-      } else {
-        await apiFetch('/api/territorial/seccionales', { method: 'POST', body: JSON.stringify(payload) });
-        notify('Seccional agregada.');
-      }
+      await saveSeccional(
+        user,
+        {
+          department_id: seccDeptId,
+          district_id: seccDistId,
+          number: Number(seccNum),
+          name: seccName,
+          active: true,
+        },
+        editSeccId || undefined
+      );
+      notify(editSeccId ? 'Seccional actualizada.' : 'Seccional agregada.');
       setSeccNum('');
       setSeccName('');
       setEditSeccId(null);
@@ -114,23 +111,16 @@ export const TerritorialPage: React.FC = () => {
     }
   };
 
-  const toggleActive = async (type: 'departments' | 'districts' | 'seccionales', id: number, currentActive: number) => {
-    try {
-      await apiFetch(`/api/territorial/${type}/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ active: currentActive === 1 ? 0 : 1 }),
-      });
-      await refreshTerritorial();
-      notify('Estado actualizado.');
-    } catch (err: unknown) {
-      notify(err instanceof Error ? err.message : 'Error al actualizar estado.', 'error');
-    }
-  };
-
   const confirmDelete = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || !user) return;
     try {
-      await apiFetch(`/api/territorial/${deleteTarget.type}/${deleteTarget.id}`, { method: 'DELETE' });
+      if (deleteTarget.type === 'departments') {
+        await deleteDepartment(user, deleteTarget.id, deleteTarget.label);
+      } else if (deleteTarget.type === 'districts') {
+        await deleteDistrict(user, deleteTarget.id, deleteTarget.label);
+      } else {
+        await deleteSeccional(user, deleteTarget.id, deleteTarget.label);
+      }
       notify('Elemento eliminado.');
       setDeleteTarget(null);
       await refreshTerritorial();
@@ -141,11 +131,11 @@ export const TerritorialPage: React.FC = () => {
   };
 
   const visibleDistricts = distFilterDept
-    ? districts.filter((d) => d.department_id === Number(distFilterDept))
+    ? districts.filter((d) => d.department_id === distFilterDept)
     : districts;
 
   const visibleSeccionales = seccFilterDept
-    ? seccionales.filter((s) => s.department_id === Number(seccFilterDept))
+    ? seccionales.filter((s) => s.department_id === seccFilterDept)
     : seccionales;
 
   return (
@@ -256,7 +246,16 @@ export const TerritorialPage: React.FC = () => {
                         <div className="inline-flex items-center gap-1">
                           <button
                             type="button"
-                            onClick={() => toggleActive('departments', d.id, d.active)}
+                            onClick={async () => {
+                              if (!user) return;
+                              try {
+                                await toggleDepartmentActive(user, d);
+                                await refreshTerritorial();
+                                notify('Estado actualizado.');
+                              } catch (err: unknown) {
+                                notify(err instanceof Error ? err.message : 'Error al actualizar estado.', 'error');
+                              }
+                            }}
                             className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100"
                             title="Activar / Desactivar"
                           >
@@ -393,7 +392,16 @@ export const TerritorialPage: React.FC = () => {
                           <div className="inline-flex items-center gap-1">
                             <button
                               type="button"
-                              onClick={() => toggleActive('districts', dis.id, dis.active)}
+                              onClick={async () => {
+                                if (!user) return;
+                                try {
+                                  await toggleDistrictActive(user, dis);
+                                  await refreshTerritorial();
+                                  notify('Estado actualizado.');
+                                } catch (err: unknown) {
+                                  notify(err instanceof Error ? err.message : 'Error al actualizar estado.', 'error');
+                                }
+                              }}
                               className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100"
                             >
                               <Power className="h-4 w-4" />
@@ -564,7 +572,16 @@ export const TerritorialPage: React.FC = () => {
                           <div className="inline-flex items-center gap-1">
                             <button
                               type="button"
-                              onClick={() => toggleActive('seccionales', s.id, s.active)}
+                              onClick={async () => {
+                                if (!user) return;
+                                try {
+                                  await toggleSeccionalActive(user, s);
+                                  await refreshTerritorial();
+                                  notify('Estado actualizado.');
+                                } catch (err: unknown) {
+                                  notify(err instanceof Error ? err.message : 'Error al actualizar estado.', 'error');
+                                }
+                              }}
                               className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100"
                             >
                               <Power className="h-4 w-4" />

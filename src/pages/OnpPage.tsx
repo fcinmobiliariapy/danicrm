@@ -14,8 +14,9 @@ import {
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { useApp } from '../context/AppContext';
-import { apiFetch, formatDisplayDate, formatNumber } from '../lib/api';
+import { formatDisplayDate, formatNumber } from '../lib/api';
 import { exportTableToExcel, exportTableToPDF } from '../lib/export';
+import { deleteOnp, listOnp, saveOnp } from '../lib/firestoreService';
 import { OnpRecord } from '../types';
 
 interface OnpResponse {
@@ -29,10 +30,11 @@ interface OnpResponse {
 }
 
 export const OnpPage: React.FC = () => {
-  const { customFields, settings, hasPermission, notify } = useApp();
+  const { user, customFields, settings, hasPermission, notify } = useApp();
+  const canViewSensitive = hasPermission('sensitive_data:view');
 
   const moduleCustomFields = useMemo(
-    () => customFields.filter((f) => f.module === 'onp' && f.active === 1),
+    () => customFields.filter((f) => f.module === 'onp' && f.active),
     [customFields]
   );
 
@@ -74,37 +76,45 @@ export const OnpPage: React.FC = () => {
   const [saving, setSaving] = useState(false);
 
   const loadData = useCallback(async () => {
+    if (!user) return;
     setLoading(true);
     try {
-      const qs = new URLSearchParams({
-        page: String(page),
-        limit: '15',
-        sort_by: sortBy,
-      });
-      if (search.trim()) qs.set('search', search.trim());
-      if (filterOrg) qs.set('organization', filterOrg);
-      const res = await apiFetch<OnpResponse>(`/api/onp?${qs.toString()}`);
+      const res = await listOnp(
+        user,
+        {
+          page,
+          limit: 15,
+          sort_by: sortBy,
+          search: search.trim() || undefined,
+          organization: filterOrg || undefined,
+        },
+        canViewSensitive
+      );
       setData(res);
     } catch (err: unknown) {
       notify(err instanceof Error ? err.message : 'Error al cargar registros ONP.', 'error');
     } finally {
       setLoading(false);
     }
-  }, [page, sortBy, search, filterOrg, notify]);
+  }, [user, page, sortBy, search, filterOrg, canViewSensitive, notify]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
   const fetchAllAscending = async (): Promise<OnpRecord[]> => {
-    const qs = new URLSearchParams({
-      page: '1',
-      limit: '500',
-      sort_by: sortBy,
-    });
-    if (search.trim()) qs.set('search', search.trim());
-    if (filterOrg) qs.set('organization', filterOrg);
-    const res = await apiFetch<OnpResponse>(`/api/onp?${qs.toString()}`);
+    if (!user) return [];
+    const res = await listOnp(
+      user,
+      {
+        page: 1,
+        limit: 2000,
+        sort_by: sortBy,
+        search: search.trim() || undefined,
+        organization: filterOrg || undefined,
+      },
+      canViewSensitive
+    );
     return res.items;
   };
 
@@ -151,6 +161,7 @@ export const OnpPage: React.FC = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     setFormError('');
     for (const cf of moduleCustomFields) {
       if (cf.required && !String(customValues[cf.field_key] || '').trim()) {
@@ -161,27 +172,19 @@ export const OnpPage: React.FC = () => {
 
     setSaving(true);
     try {
-      const payload = {
-        full_name: fullName,
-        phone,
-        organization,
-        registered_at: registeredAt,
-        notes,
-        custom_fields: customValues,
-      };
-      if (editing) {
-        await apiFetch(`/api/onp/${editing.id}`, {
-          method: 'PUT',
-          body: JSON.stringify(payload),
-        });
-        notify('Registro ONP actualizado correctamente.');
-      } else {
-        await apiFetch('/api/onp', {
-          method: 'POST',
-          body: JSON.stringify(payload),
-        });
-        notify('Registro ONP agregado correctamente.');
-      }
+      await saveOnp(
+        user,
+        {
+          full_name: fullName,
+          phone,
+          organization,
+          registered_at: registeredAt,
+          notes,
+          custom_fields: customValues,
+        },
+        editing?.id
+      );
+      notify(editing ? 'Registro ONP actualizado correctamente.' : 'Registro ONP agregado correctamente.');
       setModalOpen(false);
       await loadData();
     } catch (err: unknown) {
@@ -192,9 +195,9 @@ export const OnpPage: React.FC = () => {
   };
 
   const handleDelete = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || !user) return;
     try {
-      await apiFetch(`/api/onp/${deleteTarget.id}`, { method: 'DELETE' });
+      await deleteOnp(user, deleteTarget.id, `${deleteTarget.full_name} (${deleteTarget.organization})`);
       notify('Registro ONP eliminado.');
       setDeleteTarget(null);
       await loadData();
@@ -665,13 +668,7 @@ export const OnpPage: React.FC = () => {
               {moduleCustomFields.length > 0 && (
                 <div className="pt-2 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {moduleCustomFields.map((cf) => {
-                    const opts = (() => {
-                      try {
-                        return JSON.parse(cf.options_json || '[]') as string[];
-                      } catch {
-                        return [];
-                      }
-                    })();
+                    const opts = cf.options || [];
                     return (
                       <div key={cf.id} className={cf.field_type === 'textarea' ? 'sm:col-span-2' : ''}>
                         <label className="block text-xs font-semibold text-slate-700 mb-1">

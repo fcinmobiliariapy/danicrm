@@ -1,16 +1,32 @@
+export type RoleSlug = 'super_admin' | 'admin' | 'coordinator' | 'viewer';
+
 export interface User {
-  id: number;
+  id: string;
+  uid: string;
   username: string;
   full_name: string;
   email: string;
-  role_id: number;
-  role_slug: string;
+  role_slug: RoleSlug;
   role_name: string;
+  active: boolean;
+  custom_permissions?: Record<string, boolean>;
   permissions: Record<string, boolean>;
+  last_login_at?: string | null;
+}
+
+export interface UserInvite {
+  id: string;
+  username: string;
+  full_name: string;
+  email: string;
+  role_slug: RoleSlug;
+  role_name: string;
+  active: boolean;
+  custom_permissions?: Record<string, boolean>;
 }
 
 export interface SystemSettings {
-  id: number;
+  id?: string;
   platform_name: string;
   organization_name: string;
   campaign_reference: string;
@@ -33,66 +49,67 @@ export interface SystemSettings {
   contact_address: string;
   document_format: 'A4' | 'LETTER';
   date_format: 'DD/MM/YYYY' | 'YYYY-MM-DD';
-  report_show_charts: number;
-  report_show_totals: number;
+  report_show_charts: boolean;
+  report_show_totals: boolean;
 }
 
 export interface Department {
-  id: number;
+  id: string;
   code: string;
   name: string;
-  active: number;
+  active: boolean;
 }
 
 export interface District {
-  id: number;
-  department_id: number;
+  id: string;
+  department_id: string;
   name: string;
-  active: number;
+  active: boolean;
 }
 
 export interface Seccional {
-  id: number;
-  department_id: number;
-  district_id: number;
+  id: string;
+  department_id: string;
+  district_id: string;
   number: number;
   name: string;
-  active: number;
+  active: boolean;
 }
 
 export interface CustomField {
-  id: number;
+  id: string;
   module: 'coordinators' | 'youth' | 'women' | 'onp' | 'projections' | 'agenda';
   field_key: string;
   label: string;
   field_type: 'text' | 'number' | 'select' | 'date' | 'textarea';
-  required: number;
-  active: number;
+  required: boolean;
+  active: boolean;
   sort_order: number;
-  options_json: string;
+  options: string[];
 }
 
 export interface PersonRecord {
-  id: number;
+  id: string;
   first_name: string;
   last_name: string;
   ci: string;
   ci_raw?: string;
-  department_id: number;
-  district_id: number;
+  department_id: string;
+  district_id: string;
   department_name?: string;
   district_name?: string;
   seccional_number: number;
   phone: string;
+  phone_raw?: string;
   registered_at: string;
   notes: string;
-  consent_accepted: number;
+  consent_accepted: boolean;
   custom_fields: Record<string, string | number>;
   created_at?: string;
 }
 
 export interface OnpRecord {
-  id: number;
+  id: string;
   full_name: string;
   phone: string;
   phone_raw?: string;
@@ -104,13 +121,13 @@ export interface OnpRecord {
 }
 
 export interface VoteProjection {
-  id: number;
-  coordinator_id: number;
+  id: string;
+  coordinator_id: string;
   first_name: string;
   last_name: string;
   ci: string;
-  department_id: number;
-  district_id: number;
+  department_id: string;
+  district_id: string;
   department_name: string;
   district_name: string;
   seccional_number: number;
@@ -121,14 +138,14 @@ export interface VoteProjection {
 }
 
 export interface AgendaEvent {
-  id: number;
+  id: string;
   title: string;
   event_type: string;
   event_date: string;
   start_time: string;
   end_time: string;
-  department_id: number | null;
-  district_id: number | null;
+  department_id: string | null;
+  district_id: string | null;
   department_name?: string;
   district_name?: string;
   seccional_number: number | null;
@@ -142,6 +159,34 @@ export interface AgendaEvent {
   activity_summary?: string;
   attendance_count?: number;
   activity_outcomes?: string;
+}
+
+export interface SavedReport {
+  id: string;
+  title: string;
+  report_type:
+    | 'coordinators'
+    | 'youth'
+    | 'women'
+    | 'onp'
+    | 'projections_general'
+    | 'projections_dept'
+    | 'projections_district'
+    | 'projections_seccional';
+  filters: Record<string, string>;
+  columns: string[];
+  generated_by: string;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  user_uid: string;
+  username: string;
+  action: string;
+  module: string;
+  entity_id: string;
+  details: string;
+  created_at: string;
 }
 
 export type PageKey =

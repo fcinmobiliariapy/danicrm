@@ -11,7 +11,8 @@ import {
   YAxis,
 } from 'recharts';
 import { useApp } from '../context/AppContext';
-import { apiFetch, formatDisplayDate, formatNumber } from '../lib/api';
+import { formatDisplayDate, formatNumber } from '../lib/api';
+import { getDashboardData } from '../lib/firestoreService';
 import { PageKey } from '../types';
 
 interface DashboardData {
@@ -27,7 +28,7 @@ interface DashboardData {
     scheduledMeetings: number;
   };
   upcomingEvents: {
-    id: number;
+    id: string;
     title: string;
     event_type: string;
     event_date: string;
@@ -38,7 +39,7 @@ interface DashboardData {
   }[];
   recentRecords: {
     tipo: string;
-    id: number;
+    id: string;
     first_name: string;
     last_name: string;
     ci: string;
@@ -71,16 +72,24 @@ interface DashboardData {
 }
 
 export const DashboardPage: React.FC<{ onNavigate: (p: PageKey) => void }> = ({ onNavigate }) => {
-  const { settings, hasPermission } = useApp();
+  const { user, departments, districts, seccionales, territorialMaps, settings, hasPermission } = useApp();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  const canViewSensitive = hasPermission('sensitive_data:view');
+
   useEffect(() => {
+    if (!user) return;
     let active = true;
     (async () => {
       try {
-        const res = await apiFetch<DashboardData>('/api/dashboard');
+        const res = await getDashboardData(
+          user,
+          territorialMaps,
+          { departments, districts, seccionales },
+          canViewSensitive
+        );
         if (active) setData(res);
       } catch (err: unknown) {
         if (active) setError(err instanceof Error ? err.message : 'Error al cargar indicadores.');
@@ -91,7 +100,7 @@ export const DashboardPage: React.FC<{ onNavigate: (p: PageKey) => void }> = ({ 
     return () => {
       active = false;
     };
-  }, []);
+  }, [user, territorialMaps, departments, districts, seccionales, canViewSensitive]);
 
   if (loading) {
     return (

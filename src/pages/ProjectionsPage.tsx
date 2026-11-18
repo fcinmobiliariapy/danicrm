@@ -23,17 +23,23 @@ import {
 } from 'recharts';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { useApp } from '../context/AppContext';
-import { apiFetch, formatDisplayDate, formatNumber } from '../lib/api';
+import { formatDisplayDate, formatNumber } from '../lib/api';
 import { exportTableToExcel, exportTableToPDF } from '../lib/export';
+import {
+  deleteProjection,
+  listProjections,
+  saveProjection,
+  searchCoordinators,
+} from '../lib/firestoreService';
 import { VoteProjection } from '../types';
 
 interface CoordinatorHit {
-  id: number;
+  id: string;
   first_name: string;
   last_name: string;
   ci: string;
-  department_id: number;
-  district_id: number;
+  department_id: string;
+  district_id: string;
   seccional_number: number;
   department_name: string;
   district_name: string;
@@ -41,8 +47,8 @@ interface CoordinatorHit {
 
 interface ProjectionsResponse {
   items: VoteProjection[];
-  byDepartment: { id: number; name: string; total_votes: number; records_count: number }[];
-  byDistrict: { id: number; name: string; department_name: string; total_votes: number; records_count: number }[];
+  byDepartment: { id: string; name: string; total_votes: number; records_count: number }[];
+  byDistrict: { id: string; name: string; department_name: string; total_votes: number; records_count: number }[];
   bySeccional: { seccional_number: number; department_name: string; district_name: string; total_votes: number; records_count: number }[];
   grandTotal: number;
 }
@@ -50,7 +56,8 @@ interface ProjectionsResponse {
 const PIE_COLORS = ['#1E3A8A', '#B91C1C', '#D97706', '#0284C7', '#16A34A', '#475569', '#0F766E'];
 
 export const ProjectionsPage: React.FC = () => {
-  const { user, departments, districts, settings, hasPermission, notify } = useApp();
+  const { user, departments, districts, territorialMaps, settings, hasPermission, notify } = useApp();
+  const canViewSensitive = hasPermission('sensitive_data:view');
 
   const [data, setData] = useState<ProjectionsResponse>({
     items: [],
@@ -81,45 +88,49 @@ export const ProjectionsPage: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<VoteProjection | null>(null);
 
   const filterDistricts = useMemo(
-    () => (filterDept ? districts.filter((d) => d.department_id === Number(filterDept)) : districts),
+    () => (filterDept ? districts.filter((d) => d.department_id === filterDept) : districts),
     [districts, filterDept]
   );
 
   const loadData = useCallback(async () => {
+    if (!user) return;
     setLoading(true);
     try {
-      const qs = new URLSearchParams();
-      if (filterDept) qs.set('department_id', filterDept);
-      if (filterDist) qs.set('district_id', filterDist);
-      if (filterSecc.trim()) qs.set('seccional_number', filterSecc.trim());
-      if (search.trim()) qs.set('search', search.trim());
-      const res = await apiFetch<ProjectionsResponse>(`/api/projections?${qs.toString()}`);
+      const res = await listProjections(
+        user,
+        {
+          department_id: filterDept || undefined,
+          district_id: filterDist || undefined,
+          seccional_number: filterSecc.trim() || undefined,
+          search: search.trim() || undefined,
+        },
+        territorialMaps,
+        canViewSensitive
+      );
       setData(res);
     } catch (err: unknown) {
       notify(err instanceof Error ? err.message : 'Error al cargar proyecciones.', 'error');
     } finally {
       setLoading(false);
     }
-  }, [filterDept, filterDist, filterSecc, search, notify]);
+  }, [user, filterDept, filterDist, filterSecc, search, territorialMaps, canViewSensitive, notify]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
   useEffect(() => {
-    if (!modalOpen || editing) return;
+    if (!modalOpen || editing || !user) return;
     const timer = setTimeout(async () => {
       try {
-        const res = await apiFetch<CoordinatorHit[]>(
-          `/api/people/coordinators/search?q=${encodeURIComponent(coordQuery.trim())}`
-        );
+        const res = await searchCoordinators(user, coordQuery, territorialMaps);
         setCoordResults(res);
       } catch {
         setCoordResults([]);
       }
     }, 180);
     return () => clearTimeout(timer);
-  }, [coordQuery, modalOpen, editing]);
+  }, [user, coordQuery, modalOpen, editing, territorialMaps]);
 
   const openCreate = () => {
     setEditing(null);
@@ -154,6 +165,7 @@ export const ProjectionsPage: React.FC = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     setFormError('');
     if (!selectedCoord) {
       setFormError('Busque y seleccione un coordinador válido.');
@@ -167,28 +179,20 @@ export const ProjectionsPage: React.FC = () => {
 
     setSaving(true);
     try {
-      if (editing) {
-        await apiFetch(`/api/projections/${editing.id}`, {
-          method: 'PUT',
-          body: JSON.stringify({
-            estimated_votes: votesNum,
-            responsible_name: responsibleName,
-            notes,
-          }),
-        });
-        notify('Proyección de votos actualizada.');
-      } else {
-        await apiFetch('/api/projections', {
-          method: 'POST',
-          body: JSON.stringify({
-            coordinator_id: selectedCoord.id,
-            estimated_votes: votesNum,
-            responsible_name: responsibleName,
-            notes,
-          }),
-        });
-        notify('Proyección de votos registrada.');
-      }
+      await saveProjection(
+        user,
+        {
+          coordinator_id: selectedCoord.id,
+          department_id: selectedCoord.department_id,
+          district_id: selectedCoord.district_id,
+          seccional_number: selectedCoord.seccional_number,
+          estimated_votes: votesNum,
+          responsible_name: responsibleName,
+          notes,
+        },
+        editing?.id
+      );
+      notify(editing ? 'Proyección de votos actualizada.' : 'Proyección de votos registrada.');
       setModalOpen(false);
       await loadData();
     } catch (err: unknown) {
@@ -199,9 +203,9 @@ export const ProjectionsPage: React.FC = () => {
   };
 
   const handleDelete = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || !user) return;
     try {
-      await apiFetch(`/api/projections/${deleteTarget.id}`, { method: 'DELETE' });
+      await deleteProjection(user, deleteTarget.id);
       notify('Proyección eliminada.');
       setDeleteTarget(null);
       await loadData();
